@@ -367,36 +367,50 @@ def parse_shutdown_date(date_string):
     Parse shutdown date string to datetime object.
     Returns None if parsing fails.
 
-    Handles complex multi-date strings like:
-    "Standard deployment type retires on 2026-03-31, with auto-upgrades
-     scheduled to start on 2026-03-09. For other deployment types,
-     including ALL Provisioned, Global Standard, and Data Zone Standard,
-     the retirement date has been moved to 2026-10-01."
+    Handles:
+    - ISO dates:    "2026-03-31"
+    - Month dates:  "July 7, 2026" / "Mar 1, 2026" / "January 15th, 2026"
+    - With regions: "July 7, 2026 (us-west-2 and us-east-2 Regions)"
+                    "October 4, 2024 (only in us-west-2)"
+    - Multi-date:   "retires on 2026-03-31 ... moved to 2026-10-01"  (returns earliest)
     """
-    # Handle complex Azure-style retirement strings with multiple dates
-    # Extract all dates that look like YYYY-MM-DD
-    date_pattern = r'\b(\d{4}[-–]\d{2}[-–]\d{2})\b'
-    matches = re.findall(date_pattern, date_string)
+    # Step 1: strip parenthetical content — region qualifiers like
+    # "(us-west-2 and us-east-2 Regions)" confuse the fuzzy parser because
+    # region names contain numbers and dashes that look like date components.
+    cleaned = re.sub(r'\(.*?\)', '', date_string).strip().rstrip(',').strip()
 
-    if matches:
-        # Parse all found dates and return the earliest one
+    # Step 2: try extracting all YYYY-MM-DD dates from the cleaned string
+    # (handles Azure-style multi-date retirement strings)
+    iso_matches = re.findall(r'\b(\d{4}[-–]\d{2}[-–]\d{2})\b', cleaned)
+    if iso_matches:
         parsed_dates = []
-        for match in matches:
-            # Normalize en-dash or em-dash to hyphen
-            normalized_date = match.replace('–', '-').replace('—', '-')
+        for match in iso_matches:
+            normalized = match.replace('–', '-').replace('—', '-')
             try:
-                parsed = date_parser.parse(normalized_date)
-                parsed_dates.append(parsed)
+                parsed_dates.append(date_parser.parse(normalized))
             except (ValueError, OverflowError):
                 continue
-
         if parsed_dates:
-            return min(parsed_dates)  # Return earliest date
+            return min(parsed_dates)
 
-    # Fallback to fuzzy parsing for simpler date strings
+    # Step 3: try extracting a "Month Day, Year" style date explicitly
+    # (e.g. "July 7, 2026", "Mar 1, 2026", "January 15th, 2026")
+    month_match = re.search(
+        r'\b(January|February|March|April|May|June|July|August|'
+        r'September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'
+        r'\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b',
+        cleaned, re.IGNORECASE,
+    )
+    if month_match:
+        try:
+            return date_parser.parse(month_match.group(0))
+        except (ValueError, OverflowError):
+            pass
+
+    # Step 4: fuzzy fallback on the cleaned string
     try:
-        parsed_date = date_parser.parse(date_string, fuzzy=True)
-        return parsed_date
+        return date_parser.parse(cleaned, fuzzy=True)
     except (ValueError, OverflowError):
         return None
 
