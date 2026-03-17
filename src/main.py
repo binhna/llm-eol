@@ -334,19 +334,19 @@ def calculate_risk_info(shutdown_date_str):
     # Determine risk level and color
     if days_remaining < 0:
         risk_level = 'EXPIRED'
-        color = {'red': 0.8, 'green': 0.0, 'blue': 0.0}  # Dark red
+        color = {'red': 0.93, 'green': 0.56, 'blue': 0.56}  # Muted rose
     elif days_remaining <= 30:
         risk_level = 'CRITICAL'
-        color = {'red': 1.0, 'green': 0.4, 'blue': 0.0}  # Orange
+        color = {'red': 1.0, 'green': 0.70, 'blue': 0.48}  # Soft peach-orange
     elif days_remaining <= 90:
         risk_level = 'HIGH'
-        color = {'red': 1.0, 'green': 0.8, 'blue': 0.0}  # Yellow
+        color = {'red': 1.0, 'green': 0.90, 'blue': 0.45}  # Soft amber
     elif days_remaining <= 180:
         risk_level = 'MEDIUM'
-        color = {'red': 1.0, 'green': 0.95, 'blue': 0.6}  # Light yellow
+        color = {'red': 1.0, 'green': 0.97, 'blue': 0.78}  # Pale yellow
     else:
         risk_level = 'LOW'
-        color = {'red': 0.85, 'green': 0.95, 'blue': 0.85}  # Light green
+        color = {'red': 0.76, 'green': 0.93, 'blue': 0.76}  # Soft mint
     
     return (formatted_date, days_remaining, risk_level, color)
 
@@ -361,9 +361,10 @@ def _get_or_create_worksheet(spreadsheet, title, index):
         return spreadsheet.add_worksheet(title=title, rows=1000, cols=20, index=index)
 
 
-def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index):
+def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, risk_col_index):
     """
     Clear, write all data, and apply all formatting in a single batch_update call.
+    Only the Risk Level cell is colored (not the whole row).
     This keeps API write requests to 3 per sheet regardless of row count, avoiding
     the 60-writes/min quota limit.
     """
@@ -402,7 +403,7 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index):
         }
     })
 
-    # Data rows: one repeatCell per row (all bundled into the same batch request)
+    # Risk Level cell only: color just that one column per row
     for i, color in enumerate(row_colors):
         row_idx = i + 1  # 0-based; row 0 is the header
         requests.append({
@@ -410,7 +411,7 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index):
                 'range': {
                     'sheetId': sheet_id,
                     'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
-                    'startColumnIndex': 0, 'endColumnIndex': num_cols,
+                    'startColumnIndex': risk_col_index, 'endColumnIndex': risk_col_index + 1,
                 },
                 'cell': {'userEnteredFormat': {'backgroundColor': color}},
                 'fields': 'userEnteredFormat.backgroundColor',
@@ -488,7 +489,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
             ])
             all_colors.append(color)
 
-        _write_sheet(spreadsheet, all_sheet, all_headers, all_rows, all_colors, last_col_index=6)
+        _write_sheet(spreadsheet, all_sheet, all_headers, all_rows, all_colors, last_col_index=6, risk_col_index=5)
         print(f"  'All Models' sheet updated: {len(all_rows)} models across all providers")
 
         # ── Sheet 2: Interested Models ───────────────────────────────────────
@@ -517,7 +518,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
             interested_colors.append(color)
 
         _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
-                     last_col_index=7)
+                     last_col_index=7, risk_col_index=7)
         print(f"  'Interested Models' sheet updated: {len(interested_rows)} matched model(s)")
 
         # Remove the default 'Sheet1' tab that gspread creates on new spreadsheets
