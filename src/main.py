@@ -475,9 +475,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
 
         for item in all_deprecations:
             parsed_date, days_remaining, risk_level, color = calculate_risk_info(item['shutdown_date'])
-            parsed_display = parsed_date if days_remaining != 'N/A' and parsed_date != item['shutdown_date'] else (
-                'N/A' if days_remaining == 'N/A' else ''
-            )
+            parsed_display = parsed_date if days_remaining != 'N/A' else 'N/A'
             all_rows.append([
                 item['provider'],
                 item['model'],
@@ -502,9 +500,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
 
         for row in deprecation_matches:
             parsed_date, days_remaining, risk_level, color = calculate_risk_info(row['Shutdown Date'])
-            parsed_display = parsed_date if days_remaining != 'N/A' and parsed_date != row['Shutdown Date'] else (
-                'N/A' if days_remaining == 'N/A' else ''
-            )
+            parsed_display = parsed_date if days_remaining != 'N/A' else 'N/A'
             interested_rows.append([
                 last_updated,
                 row['Our Model'],
