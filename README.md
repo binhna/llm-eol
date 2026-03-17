@@ -11,6 +11,7 @@ A lightweight tool that scrapes LLM deprecation and retirement dates directly fr
 | Azure OpenAI | learn.microsoft.com — model retirements |
 | Anthropic | platform.claude.com/docs/about-claude/model-deprecations |
 | Vertex AI | docs.cloud.google.com — partner models deprecations |
+| AWS Bedrock | docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html |
 
 ## How It Works
 

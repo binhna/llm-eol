@@ -161,6 +161,73 @@ def parse_vertex_ai():
     return deprecations
 
 
+def parse_bedrock():
+    """
+    Parse model lifecycle data from AWS Bedrock.
+
+    Covers three lifecycle sections from the same page:
+      - Active   : uses the 'Model ID' column; EOL dates are "No sooner than X" — the
+                   prefix is stripped so the date parses correctly.
+      - Legacy   : uses the 'Model version' name (no API ID available); EOL dates are
+                   concrete. The same model can appear multiple times for different regions,
+                   so we keep only the earliest EOL date.
+      - EOL      : same structure as Legacy.
+    """
+    print("Parsing AWS Bedrock...")
+    source_url = 'https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html'
+    # model identifier -> earliest EOL date string found so far
+    earliest: dict = {}
+
+    def _keep_earliest(model, date_str):
+        if not model or model.lower() == 'nan':
+            return
+        if model not in earliest:
+            earliest[model] = date_str
+            return
+        existing = parse_shutdown_date(earliest[model])
+        new = parse_shutdown_date(date_str)
+        if existing and new and new < existing:
+            earliest[model] = date_str
+
+    try:
+        html = get_html(source_url)
+        dfs = pd.read_html(StringIO(html))
+
+        for df in dfs:
+            df.columns = [str(c).strip() for c in df.columns]
+
+            # ── Active models table (has a "Model ID" column) ──────────────
+            if 'Model ID' in df.columns and 'EOL date' in df.columns:
+                for _, row in df.iterrows():
+                    model_id = str(row['Model ID']).strip()
+                    eol = str(row['EOL date']).strip()
+                    # Strip "No sooner than " prefix
+                    m = re.match(r'no sooner than\s+(.*)', eol, re.IGNORECASE)
+                    if m:
+                        date_part = m.group(1).strip()
+                        # Skip "No sooner than launch date + 1 year" style — no concrete date
+                        if re.search(r'launch date', date_part, re.IGNORECASE):
+                            continue
+                        eol = date_part
+                    _keep_earliest(model_id, eol)
+
+            # ── Legacy / EOL tables (have a "Model version" column) ────────
+            elif 'Model version' in df.columns and 'EOL date' in df.columns:
+                for _, row in df.iterrows():
+                    model_name = str(row['Model version']).strip()
+                    eol = str(row['EOL date']).strip()
+                    _keep_earliest(model_name, eol)
+
+    except Exception as e:
+        print(f"  Failed to parse AWS Bedrock: {e}")
+        return []
+
+    return [
+        {'provider': 'AWS Bedrock', 'model': model, 'shutdown_date': date, 'source_url': source_url}
+        for model, date in earliest.items()
+    ]
+
+
 def parse_all_deprecations():
     """
     Parse deprecation data from all supported providers.
@@ -175,6 +242,7 @@ def parse_all_deprecations():
     all_deprecations.extend(parse_azure_openai())
     all_deprecations.extend(parse_anthropic())
     all_deprecations.extend(parse_vertex_ai())
+    all_deprecations.extend(parse_bedrock())
     
     # Deduplicate the results
     seen = set()
@@ -567,18 +635,18 @@ if __name__ == "__main__":
         "mistral-large-2411",
         "mistral-small-2503",
         "mistral-ocr-2505",
-        # "us.meta.llama3-3-70b-instruct-v1:0",
-        # "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-        # "us.mistral.pixtral-large-2502-v1:0",
-        # "eu.mistral.pixtral-large-2502-v1:0",
-        # "us.deepseek.r1-v1:0",
-        # "openai.gpt-oss-120b-1:0",
-        # "us.meta.llama3-2-90b-instruct-v1:0",
-        # "mistral.magistral-small-2509",
-        # "google.gemma-3-27b-it",
-        # "openai.gpt-oss-20b-1:0",
-        # "us.amazon.nova-2-lite-v1:0",
-        # "qwen.qwen3-235b-a22b-2507-v1:0"
+        "us.meta.llama3-3-70b-instruct-v1:0",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.mistral.pixtral-large-2502-v1:0",
+        "eu.mistral.pixtral-large-2502-v1:0",
+        "us.deepseek.r1-v1:0",
+        "openai.gpt-oss-120b-1:0",
+        "us.meta.llama3-2-90b-instruct-v1:0",
+        "mistral.magistral-small-2509",
+        "google.gemma-3-27b-it",
+        "openai.gpt-oss-20b-1:0",
+        "us.amazon.nova-2-lite-v1:0",
+        "qwen.qwen3-235b-a22b-2507-v1:0"
     ]
     
     # 1. Parse all the websites
