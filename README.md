@@ -71,8 +71,16 @@ Copy the service account email from `credentials.json` and share your target Goo
 
 ### Export Format
 
-The exported sheet contains the following columns:
+The spreadsheet contains two tabs:
+
+**All Models** — every model scraped from all provider pages:
+
+`Provider` | `Model` | `Scraped Shutdown Date` | `Parsed Shutdown Date` | `Days Remaining` | `Risk Level` | `Source URL`
+
+**Interested Models** — only models that matched your `my_used_models` list:
 
 `Last Updated` | `Our Model` | `Scraped Model` | `Provider` | `Scraped Shutdown Date` | `Parsed Shutdown Date` | `Days Remaining` | `Risk Level`
 
-Timestamps are recorded in the **Australia/Melbourne** timezone.
+`Parsed Shutdown Date` shows `N/A` when the raw date string could not be parsed into a date. Timestamps are recorded in the **Australia/Melbourne** timezone.
+
+The export runs on every execution (not just when matches are found), so the **All Models** tab stays current even if none of your interested models are deprecated.

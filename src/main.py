@@ -36,7 +36,7 @@ def parse_google_gemini():
                     model = str(row['Model']).strip()
                     date = str(row['Shutdown date']).strip()
                     if model and model.lower() != 'nan' and not model.startswith('Preview models'):
-                        deprecations.append({'provider': 'Google Gemini', 'model': model, 'shutdown_date': date})
+                        deprecations.append({'provider': 'Google Gemini', 'model': model, 'shutdown_date': date, 'source_url': 'https://ai.google.dev/gemini-api/docs/deprecations'})
     except Exception as e:
         print(f"  Failed to parse Gemini: {e}")
     return deprecations
@@ -56,7 +56,7 @@ def parse_openai():
                     model = str(row[model_col]).strip()
                     date = str(row['Shutdown date']).strip()
                     if model and model.lower() != 'nan':
-                        deprecations.append({'provider': 'OpenAI', 'model': model, 'shutdown_date': date})
+                        deprecations.append({'provider': 'OpenAI', 'model': model, 'shutdown_date': date, 'source_url': 'https://developers.openai.com/api/docs/deprecations/'})
     except Exception as e:
         print(f"  Failed to parse OpenAI: {e}")
     return deprecations
@@ -78,7 +78,7 @@ def parse_azure_openai():
                     
                     if model and model.lower() != 'nan':
                         full_model = f"{model} ({version})" if version and version.lower() != 'nan' else model
-                        deprecations.append({'provider': 'Azure OpenAI', 'model': full_model, 'shutdown_date': date})
+                        deprecations.append({'provider': 'Azure OpenAI', 'model': full_model, 'shutdown_date': date, 'source_url': 'https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-retirements?tabs=text'})
     except Exception as e:
         print(f"  Failed to parse Azure OpenAI: {e}")
     return deprecations
@@ -97,13 +97,13 @@ def parse_anthropic():
                     model = str(row['API Model Name']).strip()
                     date = str(row['Tentative Retirement Date']).strip()
                     if model and model.lower() != 'nan':
-                        deprecations.append({'provider': 'Anthropic', 'model': model, 'shutdown_date': date})
+                        deprecations.append({'provider': 'Anthropic', 'model': model, 'shutdown_date': date, 'source_url': 'https://platform.claude.com/docs/en/about-claude/model-deprecations'})
             elif 'Deprecated Model' in df.columns and 'Retirement Date' in df.columns:
                 for _, row in df.iterrows():
                     model = str(row['Deprecated Model']).strip()
                     date = str(row['Retirement Date']).strip()
                     if model and model.lower() != 'nan':
-                        deprecations.append({'provider': 'Anthropic', 'model': model, 'shutdown_date': date})
+                        deprecations.append({'provider': 'Anthropic', 'model': model, 'shutdown_date': date, 'source_url': 'https://platform.claude.com/docs/en/about-claude/model-deprecations'})
     except Exception as e:
         print(f"  Failed to parse Anthropic: {e}")
     return deprecations
@@ -137,7 +137,7 @@ def parse_vertex_ai():
             if date_match and id_match:
                 date = date_match.group(1).strip()
                 model_id = id_match.group(1).strip()
-                deprecations.append({'provider': 'Vertex AI', 'model': model_id, 'shutdown_date': date})
+                deprecations.append({'provider': 'Vertex AI', 'model': model_id, 'shutdown_date': date, 'source_url': 'https://docs.cloud.google.com/vertex-ai/generative-ai/docs/deprecations/partner-models'})
         
         # Method 2: Look for models with "Launch stage" showing "deprecated"
         # This catches models like claude-3-7-sonnet that use a different format
@@ -155,7 +155,7 @@ def parse_vertex_ai():
                 model_id = model_match.group(1).strip()
                 # Avoid duplicates
                 if not any(d['model'] == model_id and d['provider'] == 'Vertex AI' for d in deprecations):
-                    deprecations.append({'provider': 'Vertex AI', 'model': model_id, 'shutdown_date': date})
+                    deprecations.append({'provider': 'Vertex AI', 'model': model_id, 'shutdown_date': date, 'source_url': 'https://docs.cloud.google.com/vertex-ai/generative-ai/docs/deprecations/partner-models'})
     except Exception as e:
         print(f"  Failed to parse Vertex AI: {e}")
     return deprecations
@@ -352,13 +352,85 @@ def calculate_risk_info(shutdown_date_str):
 
 
 
-def export_to_google_sheets(deprecation_matches, spreadsheet_name='LLM Deprecation Monitoring'):
+def _get_or_create_worksheet(spreadsheet, title, index):
+    """Return a worksheet by title, creating it (at given tab index) if it doesn't exist."""
+    import gspread
+    try:
+        return spreadsheet.worksheet(title)
+    except gspread.WorksheetNotFound:
+        return spreadsheet.add_worksheet(title=title, rows=1000, cols=20, index=index)
+
+
+def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index):
     """
-    Export deprecation matches to Google Sheets with Melbourne timestamp and risk-based color coding.
+    Clear, write all data, and apply all formatting in a single batch_update call.
+    This keeps API write requests to 3 per sheet regardless of row count, avoiding
+    the 60-writes/min quota limit.
+    """
+    num_cols = last_col_index + 1
+    sheet_id = sheet.id
+
+    # 1. Clear existing content (1 request)
+    sheet.clear()
+
+    # 2. Write headers + all data rows in one call (1 request)
+    all_values = [headers] + rows
+    col_letter = chr(ord('A') + last_col_index)
+    sheet.update(values=all_values, range_name=f'A1:{col_letter}{len(all_values)}')
+
+    # 3. Build ALL formatting changes and send as a single batch_update (1 request)
+    requests = []
+
+    # Header: dark background, bold white text
+    requests.append({
+        'repeatCell': {
+            'range': {
+                'sheetId': sheet_id,
+                'startRowIndex': 0, 'endRowIndex': 1,
+                'startColumnIndex': 0, 'endColumnIndex': num_cols,
+            },
+            'cell': {'userEnteredFormat': {
+                'backgroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2},
+                'textFormat': {
+                    'bold': True,
+                    'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                },
+            }},
+            'fields': 'userEnteredFormat.backgroundColor,'
+                      'userEnteredFormat.textFormat.bold,'
+                      'userEnteredFormat.textFormat.foregroundColor',
+        }
+    })
+
+    # Data rows: one repeatCell per row (all bundled into the same batch request)
+    for i, color in enumerate(row_colors):
+        row_idx = i + 1  # 0-based; row 0 is the header
+        requests.append({
+            'repeatCell': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                    'startColumnIndex': 0, 'endColumnIndex': num_cols,
+                },
+                'cell': {'userEnteredFormat': {'backgroundColor': color}},
+                'fields': 'userEnteredFormat.backgroundColor',
+            }
+        })
+
+    if requests:
+        spreadsheet.batch_update({'requests': requests})
+
+
+def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_name='LLM Deprecation Monitoring'):
+    """
+    Export to Google Sheets with two tabs:
+      - 'All Models'       : every model scraped from all provider pages
+      - 'Interested Models': only models that matched your my_used_models list
 
     Args:
-        deprecation_matches: List of deprecation match dictionaries
-        spreadsheet_name: Name of the Google Sheet to create/update
+        all_deprecations:   Full list of scraped deprecation records (from parse_all_deprecations)
+        deprecation_matches: Filtered list of records matching my_used_models (from check_my_models)
+        spreadsheet_name:   Name of the Google Sheet to create/update
 
     Setup Instructions:
         1. Install required packages: pip install gspread google-auth python-dateutil
@@ -372,90 +444,105 @@ def export_to_google_sheets(deprecation_matches, spreadsheet_name='LLM Deprecati
         import gspread
         from google.oauth2.service_account import Credentials
 
-        # Define the scope
         scope = ['https://spreadsheets.google.com/feeds',
                  'https://www.googleapis.com/auth/drive']
 
-        # Load credentials — override path via GOOGLE_CREDENTIALS_FILE env var
         credentials_file = os.environ.get('GOOGLE_CREDENTIALS_FILE', 'credentials.json')
         creds = Credentials.from_service_account_file(credentials_file, scopes=scope)
         client = gspread.authorize(creds)
-        
-        # Get Melbourne time
+
         melbourne_tz = pytz.timezone('Australia/Melbourne')
         last_updated = datetime.now(melbourne_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
-        
-        # Try to open existing sheet or create new one
-        is_new_sheet = False
+
+        # Open or create the spreadsheet
+        is_new_spreadsheet = False
         try:
-            sheet = client.open(spreadsheet_name).sheet1
+            spreadsheet = client.open(spreadsheet_name)
         except gspread.SpreadsheetNotFound:
             spreadsheet = client.create(spreadsheet_name)
-            sheet = spreadsheet.sheet1
-            is_new_sheet = True
-            print(f"Created new spreadsheet: {spreadsheet_name}")
-            print(f"Share it with your email: {spreadsheet.url}")
-        
-        # Clear existing data
-        sheet.clear()
-        
-        # Prepare data with timestamp and risk analysis
-        headers = ['Last Updated', 'Our Model', 'Scraped Model', 'Provider', 'Scraped Shutdown Date', 'Parsed Shutdown Date', 'Days Remaining', 'Risk Level']
-        
-        rows = []
-        row_colors = []
-        
+            is_new_spreadsheet = True
+            print(f"  Created new spreadsheet: {spreadsheet_name}")
+            print(f"  Share it at: {spreadsheet.url}")
+
+        # ── Sheet 1: All Models ──────────────────────────────────────────────
+        all_sheet = _get_or_create_worksheet(spreadsheet, 'All Models', index=0)
+
+        all_headers = ['Provider', 'Model', 'Scraped Shutdown Date',
+                       'Parsed Shutdown Date', 'Days Remaining', 'Risk Level', 'Source URL']
+        all_rows = []
+        all_colors = []
+
+        for item in all_deprecations:
+            parsed_date, days_remaining, risk_level, color = calculate_risk_info(item['shutdown_date'])
+            parsed_display = parsed_date if days_remaining != 'N/A' and parsed_date != item['shutdown_date'] else (
+                'N/A' if days_remaining == 'N/A' else ''
+            )
+            all_rows.append([
+                item['provider'],
+                item['model'],
+                item['shutdown_date'],
+                parsed_display,
+                str(days_remaining),
+                risk_level,
+                item.get('source_url', '')
+            ])
+            all_colors.append(color)
+
+        _write_sheet(spreadsheet, all_sheet, all_headers, all_rows, all_colors, last_col_index=6)
+        print(f"  'All Models' sheet updated: {len(all_rows)} models across all providers")
+
+        # ── Sheet 2: Interested Models ───────────────────────────────────────
+        interested_sheet = _get_or_create_worksheet(spreadsheet, 'Interested Models', index=1)
+
+        interested_headers = ['Last Updated', 'Our Model', 'Scraped Model', 'Provider',
+                               'Scraped Shutdown Date', 'Parsed Shutdown Date', 'Days Remaining', 'Risk Level']
+        interested_rows = []
+        interested_colors = []
+
         for row in deprecation_matches:
             parsed_date, days_remaining, risk_level, color = calculate_risk_info(row['Shutdown Date'])
-            
-            rows.append([
+            parsed_display = parsed_date if days_remaining != 'N/A' and parsed_date != row['Shutdown Date'] else (
+                'N/A' if days_remaining == 'N/A' else ''
+            )
+            interested_rows.append([
                 last_updated,
                 row['Our Model'],
                 row['Scraped Model'],
                 row['Provider'],
                 row['Shutdown Date'],
-                parsed_date if parsed_date != row['Shutdown Date'] else '',
-                str(days_remaining) if days_remaining != 'N/A' else 'N/A',
+                parsed_display,
+                str(days_remaining),
                 risk_level
             ])
-            row_colors.append(color)
-        
-        # Write headers and data
-        sheet.update(values=[headers], range_name='A1:H1')
-        if rows:
-            sheet.update(values=rows, range_name=f'A2:H{len(rows)+1}')
-        
-        # Format header row
-        sheet.format('A1:H1', {
-            'backgroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2},
-            'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}}
-        })
-        
-        # Apply color coding to each data row based on risk level
-        for i, color in enumerate(row_colors, start=2):
-            sheet.format(f'A{i}:H{i}', {
-                'backgroundColor': color
-            })
-        
-        # Auto-resize columns only on first creation; subsequent runs preserve manual adjustments
-        if is_new_sheet:
-            sheet.columns_auto_resize(0, 7)
-        
-        print(f"\n✅ Successfully exported to Google Sheets with risk-based color coding!")
-        print(f"   Last Updated: {last_updated}")
-        print(f"   Risk Levels: EXPIRED (dark red) | CRITICAL ≤30 days (orange) | HIGH ≤90 days (yellow) | MEDIUM ≤180 days (light yellow) | LOW >180 days (light green)")
-        
+            interested_colors.append(color)
+
+        _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
+                     last_col_index=7)
+        print(f"  'Interested Models' sheet updated: {len(interested_rows)} matched model(s)")
+
+        # Remove the default 'Sheet1' tab that gspread creates on new spreadsheets
+        if is_new_spreadsheet:
+            try:
+                default_sheet = spreadsheet.worksheet('Sheet1')
+                spreadsheet.del_worksheet(default_sheet)
+            except gspread.WorksheetNotFound:
+                pass
+
+        print(f"\n  Successfully exported to Google Sheets!")
+        print(f"  Last Updated: {last_updated}")
+        print(f"  Risk Levels: EXPIRED (dark red) | CRITICAL <=30d (orange) | HIGH <=90d (yellow) | MEDIUM <=180d (light yellow) | LOW >180d (light green)")
+
     except ImportError as e:
-        print("\n⚠️  Google Sheets export skipped: Missing dependencies")
-        print(f"   Install with: pip install gspread google-auth python-dateutil")
-        print(f"   Error: {e}")
+        print("\n  Google Sheets export skipped: Missing dependencies")
+        print(f"  Install with: pip install gspread google-auth python-dateutil")
+        print(f"  Error: {e}")
     except FileNotFoundError:
-        print("\n⚠️  Google Sheets export skipped: credentials file not found")
-        print("   Save your service account JSON as 'credentials.json', or set the")
-        print("   GOOGLE_CREDENTIALS_FILE environment variable to its path.")
-        print("   Setup instructions: https://docs.gspread.org/en/latest/oauth2.html")
+        print("\n  Google Sheets export skipped: credentials file not found")
+        print("  Save your service account JSON as 'credentials.json', or set the")
+        print("  GOOGLE_CREDENTIALS_FILE environment variable to its path.")
+        print("  Setup instructions: https://docs.gspread.org/en/latest/oauth2.html")
     except Exception as e:
-        print(f"\n⚠️  Google Sheets export failed: {e}")
+        print(f"\n  Google Sheets export failed: {e}")
 
 
 
@@ -503,6 +590,5 @@ if __name__ == "__main__":
     # 2. Match against Our Models
     matches = check_my_models(my_used_models, structured_deprecations)
     
-    # 3. Export to Google Sheets if there are matches
-    if matches:
-        export_to_google_sheets(matches)
+    # 3. Export to Google Sheets — always export so 'All Models' is kept current
+    export_to_google_sheets(structured_deprecations, matches)
