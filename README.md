@@ -76,7 +76,9 @@ The spreadsheet contains two tabs:
 
 **All Models** — every model scraped from all provider pages:
 
-`Provider` | `Model` | `Scraped Shutdown Date` | `Parsed Shutdown Date` | `Days Remaining` | `Risk Level` | `Source URL`
+`Provider` | `Model` | `Lifecycle Stage` | `Scraped Shutdown Date` | `Parsed Shutdown Date` | `Days Remaining` | `Risk Level` | `Source URL`
+
+> `Lifecycle Stage` is only populated for AWS Bedrock rows: `Active`, `Legacy`, or `EOL`. All other providers leave it blank. This lets you filter out Bedrock models that only have a human-readable name (Legacy/EOL) rather than a machine-readable model ID (Active).
 
 **Interested Models** — only models that matched your `my_used_models` list:
 

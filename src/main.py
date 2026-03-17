@@ -182,19 +182,19 @@ def parse_bedrock():
     """
     print("Parsing AWS Bedrock...")
     source_url = 'https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html'
-    # model identifier -> earliest EOL date string found so far
+    # model identifier -> (earliest EOL date string, lifecycle stage)
     earliest: dict = {}
 
-    def _keep_earliest(model, date_str):
+    def _keep_earliest(model, date_str, stage):
         if not model or model.lower() == 'nan':
             return
         if model not in earliest:
-            earliest[model] = date_str
+            earliest[model] = (date_str, stage)
             return
-        existing = parse_shutdown_date(earliest[model])
-        new = parse_shutdown_date(date_str)
-        if existing and new and new < existing:
-            earliest[model] = date_str
+        existing_date = parse_shutdown_date(earliest[model][0])
+        new_date = parse_shutdown_date(date_str)
+        if existing_date and new_date and new_date < existing_date:
+            earliest[model] = (date_str, stage)
 
     try:
         html = get_html(source_url)
@@ -216,22 +216,30 @@ def parse_bedrock():
                         if re.search(r'launch date', date_part, re.IGNORECASE):
                             continue
                         eol = date_part
-                    _keep_earliest(model_id, eol)
+                    _keep_earliest(model_id, eol, 'Active')
 
             # ── Legacy / EOL tables (have a "Model version" column) ────────
+            # Legacy has a "Public extended access date" column; EOL does not.
             elif 'Model version' in df.columns and 'EOL date' in df.columns:
+                stage = 'Legacy' if 'Public extended access date' in df.columns else 'EOL'
                 for _, row in df.iterrows():
                     model_name = str(row['Model version']).strip()
                     eol = str(row['EOL date']).strip()
-                    _keep_earliest(model_name, eol)
+                    _keep_earliest(model_name, eol, stage)
 
     except Exception as e:
         print(f"  Failed to parse AWS Bedrock: {e}")
         return []
 
     return [
-        {'provider': 'AWS Bedrock', 'model': model, 'shutdown_date': date, 'source_url': source_url}
-        for model, date in earliest.items()
+        {
+            'provider': 'AWS Bedrock',
+            'model': model,
+            'shutdown_date': date,
+            'lifecycle_stage': stage,
+            'source_url': source_url,
+        }
+        for model, (date, stage) in earliest.items()
     ]
 
 
@@ -556,7 +564,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
         # ── Sheet 1: All Models ──────────────────────────────────────────────
         all_sheet = _get_or_create_worksheet(spreadsheet, 'All Models', index=0)
 
-        all_headers = ['Provider', 'Model', 'Scraped Shutdown Date',
+        all_headers = ['Provider', 'Model', 'Lifecycle Stage', 'Scraped Shutdown Date',
                        'Parsed Shutdown Date', 'Days Remaining', 'Risk Level', 'Source URL']
         all_rows = []
         all_colors = []
@@ -567,6 +575,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
             all_rows.append([
                 item['provider'],
                 item['model'],
+                item.get('lifecycle_stage', ''),
                 item['shutdown_date'],
                 parsed_display,
                 str(days_remaining),
@@ -575,7 +584,8 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
             ])
             all_colors.append(color)
 
-        _write_sheet(spreadsheet, all_sheet, all_headers, all_rows, all_colors, last_col_index=6, risk_col_index=5)
+        # Columns A-H (8 cols): risk is col G (index 6), last col is H (index 7)
+        _write_sheet(spreadsheet, all_sheet, all_headers, all_rows, all_colors, last_col_index=7, risk_col_index=6)
         print(f"  'All Models' sheet updated: {len(all_rows)} models across all providers")
 
         # ── Sheet 2: Interested Models ───────────────────────────────────────
