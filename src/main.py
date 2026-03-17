@@ -478,6 +478,20 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, 
     # 3. Build ALL formatting changes and send as a single batch_update (1 request)
     requests = []
 
+    # Reset all formatting across the full worksheet first (handles leftover colors
+    # from previous runs that had more rows than the current run)
+    requests.append({
+        'repeatCell': {
+            'range': {
+                'sheetId': sheet_id,
+                'startRowIndex': 0,
+                'startColumnIndex': 0,
+            },
+            'cell': {'userEnteredFormat': {}},
+            'fields': 'userEnteredFormat',
+        }
+    })
+
     # Header: dark background, bold white text
     requests.append({
         'repeatCell': {
