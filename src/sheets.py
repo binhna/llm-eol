@@ -90,7 +90,7 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, 
         spreadsheet.batch_update({'requests': requests})
 
 
-def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_name='LLM Deprecation Monitoring'):
+def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_id):
     """
     Export to Google Sheets with two tabs:
       - 'All Models'       : every model scraped from all provider pages
@@ -99,7 +99,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
     Args:
         all_deprecations:    Full list returned by parse_all_deprecations()
         deprecation_matches: Filtered list returned by check_my_models()
-        spreadsheet_name:    Name of the Google Sheet to create/update
+        spreadsheet_id:      Google Sheets ID (from the URL: /spreadsheets/d/<ID>/edit)
 
     Setup:
         1. pip install gspread google-auth
@@ -124,14 +124,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
         melbourne_tz = pytz.timezone('Australia/Melbourne')
         last_updated = datetime.now(melbourne_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
 
-        is_new_spreadsheet = False
-        try:
-            spreadsheet = client.open(spreadsheet_name)
-        except gspread.SpreadsheetNotFound:
-            spreadsheet = client.create(spreadsheet_name)
-            is_new_spreadsheet = True
-            print(f"  Created new spreadsheet: {spreadsheet_name}")
-            print(f"  Share it at: {spreadsheet.url}")
+        spreadsheet = client.open_by_key(spreadsheet_id)
 
         # ── Sheet 1: All Models ──────────────────────────────────────────────
         # Columns A-H (indices 0-7); Risk Level = col G (index 6)
@@ -184,13 +177,6 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_n
         _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
                      last_col_index=7, risk_col_index=7)
         print(f"  'Interested Models' sheet updated: {len(interested_rows)} matched model(s)")
-
-        # Remove the default 'Sheet1' tab created on new spreadsheets
-        if is_new_spreadsheet:
-            try:
-                spreadsheet.del_worksheet(spreadsheet.worksheet('Sheet1'))
-            except gspread.WorksheetNotFound:
-                pass
 
         print(f"\n  Successfully exported to Google Sheets!")
         print(f"  Last Updated: {last_updated}")

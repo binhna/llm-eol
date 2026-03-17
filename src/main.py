@@ -2,6 +2,11 @@ from parsers import parse_all_deprecations
 from checker import check_my_models
 from sheets import export_to_google_sheets
 
+# ── Google Sheet to write results into ───────────────────────────────────────
+# Open the sheet in your browser and copy the ID from the URL:
+#   https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit
+SPREADSHEET_ID = '1zkXpUiVxZcZ9rmCD-Qc6C6oFky966vNMGvK0S1cYy6c'
+
 # ── Models your application currently uses ───────────────────────────────────
 # Add or remove model identifiers here. Supports:
 #   - Direct model IDs (e.g. "gpt-4o-mini", "anthropic.claude-3-haiku-20240307-v1:0")
@@ -47,4 +52,4 @@ if __name__ == "__main__":
     matches = check_my_models(MY_MODELS, all_deprecations)
 
     # 3. Export to Google Sheets (All Models tab always updated)
-    export_to_google_sheets(all_deprecations, matches)
+    export_to_google_sheets(all_deprecations, matches, SPREADSHEET_ID)
