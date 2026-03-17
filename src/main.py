@@ -12,6 +12,13 @@ from dateutil import parser as date_parser
 # Suppress BeautifulSoup warnings about parser choice
 warnings.filterwarnings('ignore', category=UserWarning, module='bs4')
 
+# Regex that matches AWS Bedrock cross-region inference prefixes such as
+# us., eu., ap., apac., au., ca., jp., global., us-gov.
+_BEDROCK_GEO_PREFIX_RE = re.compile(
+    r'^(?:global|us-gov|us|eu|ap|apac|au|ca|jp)\.',
+    re.IGNORECASE,
+)
+
 def get_html(url):
     """Fetch HTML content with a standard User-Agent to prevent basic blocking."""
     headers = {
@@ -282,7 +289,20 @@ def check_my_models(my_models, deprecation_data):
             if not is_match:
                 is_match = user_model_lower.startswith(scraped_model_lower + "@") or \
                            user_model_lower.startswith(scraped_model_lower + "-")
-            
+
+            # 4. Bedrock cross-region inference prefix (e.g. user: 'us.meta.llama3-3-70b-instruct-v1:0',
+            #    scraped: 'meta.llama3-3-70b-instruct-v1:0'). Strip the geo prefix and re-apply rules 1–3.
+            if not is_match and data['provider'] == 'AWS Bedrock':
+                stripped = _BEDROCK_GEO_PREFIX_RE.sub('', user_model_lower)
+                if stripped != user_model_lower:
+                    is_match = (
+                        stripped == scraped_model_lower
+                        or scraped_model_lower.startswith(stripped + " ")
+                        or scraped_model_lower.startswith(stripped + " (")
+                        or stripped.startswith(scraped_model_lower + "@")
+                        or stripped.startswith(scraped_model_lower + "-")
+                    )
+
             if is_match:
                 deprecation_matches.append({
                     'Our Model': user_model,
