@@ -90,7 +90,7 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, 
         spreadsheet.batch_update({'requests': requests})
 
 
-def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_id):
+def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_models, spreadsheet_id):
     """
     Export to Google Sheets with two tabs:
       - 'All Models'       : every model scraped from all provider pages
@@ -174,9 +174,17 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, spreadsheet_i
                 risk_level,
             ])
             interested_colors.append(color)
+        # Append unmatched models as grey rows so they're visible but clearly unfound
+        _NOT_FOUND_COLOR = {'red': 0.88, 'green': 0.88, 'blue': 0.88}
+        for model in unmatched_models:
+            interested_rows.append([
+                last_updated, model, '', '', 'Not found', 'N/A', 'N/A', 'Not found',
+            ])
+            interested_colors.append(_NOT_FOUND_COLOR)
+
         _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
                      last_col_index=7, risk_col_index=7)
-        print(f"  'Interested Models' sheet updated: {len(interested_rows)} matched model(s)")
+        print(f"  'Interested Models' sheet updated: {len(deprecation_matches)} matched, {len(unmatched_models)} not found")
 
         print(f"\n  Successfully exported to Google Sheets!")
         print(f"  Last Updated: {last_updated}")

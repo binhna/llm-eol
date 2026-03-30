@@ -73,6 +73,9 @@ def check_my_models(my_models, deprecation_data):
                     'Shutdown Date': data['shutdown_date'],
                 })
 
+    matched_set = {r['Our Model'] for r in deprecation_matches}
+    unmatched = [m for m in my_models if m not in matched_set]
+
     if deprecation_matches:
         print("\n  DEPRECATED MODELS FOUND:\n")
 
@@ -117,4 +120,10 @@ def check_my_models(my_models, deprecation_data):
     else:
         print("\n  None of your models appear to be deprecated right now.\n")
 
-    return deprecation_matches
+    if unmatched:
+        print(f"  {len(unmatched)} model(s) in your list had no match in any provider page:")
+        for m in unmatched:
+            print(f"    - {m}")
+        print()
+
+    return deprecation_matches, unmatched

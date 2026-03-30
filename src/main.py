@@ -49,7 +49,7 @@ if __name__ == "__main__":
     all_deprecations = parse_all_deprecations()
 
     # 2. Match against your model list
-    matches = check_my_models(MY_MODELS, all_deprecations)
+    matches, unmatched = check_my_models(MY_MODELS, all_deprecations)
 
     # 3. Export to Google Sheets (All Models tab always updated)
-    export_to_google_sheets(all_deprecations, matches, SPREADSHEET_ID)
+    export_to_google_sheets(all_deprecations, matches, unmatched, SPREADSHEET_ID)
