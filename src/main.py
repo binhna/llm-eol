@@ -1,7 +1,8 @@
 from parsers import parse_all_deprecations
+from parsers.bedrock_model_cards import scrape_bedrock_model_cards
 from checker import check_my_models
 from sheets import export_to_google_sheets
-from database import load_db, save_db, merge_scraped, get_all_records
+from database import load_db, save_db, merge_scraped, merge_card_metadata, get_all_records
 
 # ── Google Sheet to write results into ───────────────────────────────────────
 # Open the sheet in your browser and copy the ID from the URL:
@@ -49,14 +50,18 @@ if __name__ == "__main__":
     # 1. Scrape all provider deprecation pages
     scraped = parse_all_deprecations()
 
-    # 2. Merge into persistent DB (keeps records that vanish from provider pages)
+    # 2. Scrape Bedrock model card metadata (context window, modalities, etc.)
+    card_metadata = scrape_bedrock_model_cards()
+
+    # 3. Merge everything into the persistent DB
     db = load_db()
     db = merge_scraped(db, scraped)
+    db = merge_card_metadata(db, card_metadata)
     save_db(db)
     all_records = get_all_records(db)
 
-    # 3. Match against your model list
+    # 4. Match against your model list
     matches, unmatched = check_my_models(MY_MODELS, all_records)
 
-    # 4. Export to Google Sheets (All Models always reflects full DB)
+    # 5. Export to Google Sheets (All Models always reflects full DB)
     export_to_google_sheets(all_records, matches, unmatched, SPREADSHEET_ID)

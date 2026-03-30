@@ -71,20 +71,21 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, 
         }
     })
 
-    # Risk Level cell only: color just that one column per row
-    for i, color in enumerate(row_colors):
-        row_idx = i + 1  # 0-based; row 0 is the header
-        requests.append({
-            'repeatCell': {
-                'range': {
-                    'sheetId': sheet_id,
-                    'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
-                    'startColumnIndex': risk_col_index, 'endColumnIndex': risk_col_index + 1,
-                },
-                'cell': {'userEnteredFormat': {'backgroundColor': color}},
-                'fields': 'userEnteredFormat.backgroundColor',
-            }
-        })
+    # Risk Level cell only: color just that one column per row (skip if no risk column)
+    if risk_col_index is not None:
+        for i, color in enumerate(row_colors):
+            row_idx = i + 1  # 0-based; row 0 is the header
+            requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                        'startColumnIndex': risk_col_index, 'endColumnIndex': risk_col_index + 1,
+                    },
+                    'cell': {'userEnteredFormat': {'backgroundColor': color}},
+                    'fields': 'userEnteredFormat.backgroundColor',
+                }
+            })
 
     if requests:
         spreadsheet.batch_update({'requests': requests})
@@ -188,6 +189,41 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
                      last_col_index=7, risk_col_index=7)
         print(f"  'Interested Models' sheet updated: {len(deprecation_matches)} matched, {len(unmatched_models)} not found")
+
+        # ── Sheet 3: Bedrock Details ─────────────────────────────────────────
+        # Only rows from AWS Bedrock that have model-card metadata
+        bedrock_rows_with_meta = [
+            r for r in all_deprecations
+            if r.get('provider') == 'AWS Bedrock' and r.get('model_card_url')
+        ]
+        if bedrock_rows_with_meta:
+            details_sheet = _get_or_create_worksheet(spreadsheet, 'Bedrock Details', index=2)
+            details_headers = [
+                'Model ID', 'Lifecycle Stage',
+                'Context Window', 'Max Output Tokens',
+                'Input Modalities', 'Output Modalities',
+                'Knowledge Cutoff', 'Geo Inference IDs',
+                'Model Card URL',
+            ]
+            details_rows, details_colors = [], []
+            _neutral = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
+            for item in bedrock_rows_with_meta:
+                details_rows.append([
+                    item.get('model', ''),
+                    item.get('lifecycle_stage', ''),
+                    item.get('context_window', ''),
+                    item.get('max_output_tokens', ''),
+                    ', '.join(item['input_modalities']) if item.get('input_modalities') else '',
+                    ', '.join(item['output_modalities']) if item.get('output_modalities') else '',
+                    item.get('knowledge_cutoff', ''),
+                    ', '.join(item['geo_inference_ids']) if item.get('geo_inference_ids') else '',
+                    item.get('model_card_url', ''),
+                ])
+                details_colors.append(_neutral)
+            # No risk column on this sheet — pass risk_col_index=None
+            _write_sheet(spreadsheet, details_sheet, details_headers, details_rows, details_colors,
+                         last_col_index=8, risk_col_index=None)
+            print(f"  'Bedrock Details' sheet updated: {len(details_rows)} models with card metadata")
 
         print(f"\n  Successfully exported to Google Sheets!")
         print(f"  Last Updated: {last_updated}")
