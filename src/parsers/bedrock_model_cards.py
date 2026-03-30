@@ -11,6 +11,7 @@ Metadata extracted per card:
   input_modalities, output_modalities,
   knowledge_cutoff, geo_inference_ids, model_card_url
 """
+from __future__ import annotations
 
 import re
 from bs4 import BeautifulSoup

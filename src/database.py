@@ -28,7 +28,7 @@ DB structure  (key = "{provider}|{model}"):
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent / 'data' / 'models_db.json'
@@ -101,6 +101,29 @@ def merge_card_metadata(db: dict, card_records: list) -> dict:
             if field in record and record[field]:
                 db[key][field] = record[field]
     return db
+
+
+def cleanup_expired(db: dict, days_threshold: int = 365) -> tuple:
+    """
+    Remove records whose shutdown date expired more than `days_threshold` days ago.
+    Default threshold is 1 year — keeps the DB and the All Models sheet from
+    accumulating obsolete entries indefinitely.
+
+    Returns (updated_db, number_of_removed_records).
+    """
+    from utils import parse_shutdown_date
+    cutoff = datetime.now() - timedelta(days=days_threshold)
+    to_remove = []
+    for key, record in db.items():
+        date_str = record.get('shutdown_date', '')
+        if not date_str:
+            continue
+        parsed = parse_shutdown_date(date_str)
+        if parsed and parsed.replace(tzinfo=None) < cutoff:
+            to_remove.append(key)
+    for key in to_remove:
+        del db[key]
+    return db, len(to_remove)
 
 
 def get_all_records(db: dict) -> list:

@@ -2,7 +2,7 @@ from parsers import parse_all_deprecations
 from parsers.bedrock_model_cards import scrape_bedrock_model_cards
 from checker import check_my_models
 from sheets import export_to_google_sheets
-from database import load_db, save_db, merge_scraped, merge_card_metadata, get_all_records
+from database import load_db, save_db, merge_scraped, merge_card_metadata, cleanup_expired, get_all_records
 
 # ── Google Sheet to write results into ───────────────────────────────────────
 # Open the sheet in your browser and copy the ID from the URL:
@@ -53,10 +53,13 @@ if __name__ == "__main__":
     # 2. Scrape Bedrock model card metadata (context window, modalities, etc.)
     card_metadata = scrape_bedrock_model_cards()
 
-    # 3. Merge everything into the persistent DB
+    # 3. Merge everything into the persistent DB and prune old entries
     db = load_db()
     db = merge_scraped(db, scraped)
     db = merge_card_metadata(db, card_metadata)
+    db, removed = cleanup_expired(db, days_threshold=365)
+    if removed:
+        print(f"  Pruned {removed} record(s) expired more than 1 year ago")
     save_db(db)
     all_records = get_all_records(db)
 

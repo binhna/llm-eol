@@ -1,5 +1,5 @@
 # Service account credentials — never commit these
-*.json
+credentials.json
 
 # Python
 __pycache__/
@@ -11,4 +11,4 @@ dist/
 build/
 
 # Environment
-.envdata/models_db.json
+.env
