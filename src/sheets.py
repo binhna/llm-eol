@@ -127,29 +127,32 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         spreadsheet = client.open_by_key(spreadsheet_id)
 
         # ── Sheet 1: All Models ──────────────────────────────────────────────
-        # Columns A-H (indices 0-7); Risk Level = col G (index 6)
+        # Columns A-J (indices 0-9); Risk Level = col G (index 6)
         all_sheet = _get_or_create_worksheet(spreadsheet, 'All Models', index=0)
         all_headers = [
             'Provider', 'Model', 'Lifecycle Stage',
             'Scraped Shutdown Date', 'Parsed Shutdown Date',
             'Days Remaining', 'Risk Level', 'Source URL',
+            'First Seen', 'Last Seen',
         ]
         all_rows, all_colors = [], []
         for item in all_deprecations:
-            parsed_date, days_remaining, risk_level, color = calculate_risk_info(item['shutdown_date'])
+            parsed_date, days_remaining, risk_level, color = calculate_risk_info(item.get('shutdown_date', ''))
             all_rows.append([
-                item['provider'],
-                item['model'],
+                item.get('provider', ''),
+                item.get('model', ''),
                 item.get('lifecycle_stage', ''),
-                item['shutdown_date'],
+                item.get('shutdown_date', ''),
                 parsed_date if days_remaining != 'N/A' else 'N/A',
                 str(days_remaining),
                 risk_level,
                 item.get('source_url', ''),
+                item.get('first_seen', ''),
+                item.get('last_seen', ''),
             ])
             all_colors.append(color)
         _write_sheet(spreadsheet, all_sheet, all_headers, all_rows, all_colors,
-                     last_col_index=7, risk_col_index=6)
+                     last_col_index=9, risk_col_index=6)
         print(f"  'All Models' sheet updated: {len(all_rows)} models across all providers")
 
         # ── Sheet 2: Interested Models ───────────────────────────────────────

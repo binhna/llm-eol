@@ -1,6 +1,7 @@
 from parsers import parse_all_deprecations
 from checker import check_my_models
 from sheets import export_to_google_sheets
+from database import load_db, save_db, merge_scraped, get_all_records
 
 # ── Google Sheet to write results into ───────────────────────────────────────
 # Open the sheet in your browser and copy the ID from the URL:
@@ -46,10 +47,16 @@ MY_MODELS = [
 
 if __name__ == "__main__":
     # 1. Scrape all provider deprecation pages
-    all_deprecations = parse_all_deprecations()
+    scraped = parse_all_deprecations()
 
-    # 2. Match against your model list
-    matches, unmatched = check_my_models(MY_MODELS, all_deprecations)
+    # 2. Merge into persistent DB (keeps records that vanish from provider pages)
+    db = load_db()
+    db = merge_scraped(db, scraped)
+    save_db(db)
+    all_records = get_all_records(db)
 
-    # 3. Export to Google Sheets (All Models tab always updated)
-    export_to_google_sheets(all_deprecations, matches, unmatched, SPREADSHEET_ID)
+    # 3. Match against your model list
+    matches, unmatched = check_my_models(MY_MODELS, all_records)
+
+    # 4. Export to Google Sheets (All Models always reflects full DB)
+    export_to_google_sheets(all_records, matches, unmatched, SPREADSHEET_ID)
