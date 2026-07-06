@@ -14,36 +14,55 @@ SPREADSHEET_ID = '1zkXpUiVxZcZ9rmCD-Qc6C6oFky966vNMGvK0S1cYy6c'
 #   - Direct model IDs (e.g. "gpt-4o-mini", "anthropic.claude-3-haiku-20240307-v1:0")
 #   - Bedrock cross-region prefixes (e.g. "us.meta.llama3-3-70b-instruct-v1:0")
 #   - Version-appended IDs (e.g. "claude-3-haiku@20240307")
+# Compiled from a scan of our four products. Trailing comment shows which
+# products use each model: BE=bellmere, BU=burley, NO=norval, BO=bordertown.
 MY_MODELS = [
-    "chatgpt-4o-latest",
-    "gpt-4o-mini",
-    "claude-3-opus",
-    "gpt-4o-2024-05-13",
-    "gpt-5-nano",
-    "gpt-5-mini",
-    "gpt-5",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "claude-sonnet-4",
-    "claude-3-7-sonnet",
-    "claude-3-5-haiku",
-    "mistral-large-2411",
-    "mistral-small-2503",
-    "mistral-ocr-2505",
-    "us.meta.llama3-3-70b-instruct-v1:0",
-    "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "us.mistral.pixtral-large-2502-v1:0",
-    "eu.mistral.pixtral-large-2502-v1:0",
-    "us.deepseek.r1-v1:0",
-    "openai.gpt-oss-120b-1:0",
-    "us.meta.llama3-2-90b-instruct-v1:0",
-    "mistral.magistral-small-2509",
-    "google.gemma-3-27b-it",
-    "openai.gpt-oss-20b-1:0",
-    "us.amazon.nova-2-lite-v1:0",
-    "qwen.qwen3-235b-a22b-2507-v1:0",
+    # ── Azure OpenAI ──────────────────────────────────────────────────────────
+    "gpt-4o-mini",                 # BE, BU, BO
+    "gpt-4o-2024-05-13",           # BE, BU, BO
+    "gpt-5-nano",                  # BE, BU, NO, BO
+    "gpt-5-mini",                  # BE, BU, NO, BO
+    "gpt-5",                       # BE, BU, NO, BO
+    "gpt-5.4-nano",                # BE
+    "gpt-5.5",                     # NO
+    "text-embedding-ada-002",      # BU (embeddings)
+
+    # ── Anthropic Claude (via Vertex AI) ──────────────────────────────────────
+    "claude-sonnet-4",             # BE, BO
+    "claude-3-7-sonnet",           # BE, BO
+    "claude-3-5-haiku",            # BE, BO
+
+    # ── Google Gemini (via Vertex AI) ─────────────────────────────────────────
+    "gemini-2.0-flash",            # BE, BO
+    "gemini-2.0-flash-lite",       # BE, BO
+    "gemini-2.5-flash",            # BE, BO
+    "gemini-2.5-flash-lite",       # BE, BU, NO, BO
+    "gemini-3.1-flash-lite",       # BE
+    "gemini-3.5-flash",            # NO
+
+    # ── Mistral (via Vertex AI) ───────────────────────────────────────────────
+    "mistral-large-2411",          # BE, BO
+    "mistral-small-2503",          # BE, BO
+    "mistral-ocr-2505",            # BE, BO
+
+    # ── AWS Bedrock (cross-region inference IDs) ──────────────────────────────
+    "global.anthropic.claude-haiku-4-5-20251001-v1:0",  # BE, NO
+    "global.anthropic.claude-sonnet-4-6",               # BE
+    "us.meta.llama3-3-70b-instruct-v1:0",               # BE, NO
+    "us.meta.llama3-2-90b-instruct-v1:0",               # BE, NO
+    "us.mistral.pixtral-large-2502-v1:0",               # BE, NO
+    "eu.mistral.pixtral-large-2502-v1:0",               # BE, NO
+    "mistral.magistral-small-2509",                     # BE, NO
+    "us.deepseek.r1-v1:0",                              # BE, NO
+    "openai.gpt-oss-120b-1:0",                          # BE, NO
+    "openai.gpt-oss-20b-1:0",                           # BE, NO
+    "google.gemma-3-27b-it",                            # BE, NO
+    "us.amazon.nova-2-lite-v1:0",                       # BE, NO
+    "qwen.qwen3-235b-a22b-2507-v1:0",                   # BE, NO
+    "qwen.qwen3-next-80b-a3b",                          # BE
+    "minimax.minimax-m2.5",                             # BE
+    "moonshotai.kimi-k2.5",                             # BE
+    "zai.glm-4.7-flash",                                # BE
 ]
 
 if __name__ == "__main__":
