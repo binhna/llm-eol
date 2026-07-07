@@ -81,9 +81,15 @@ def merge_scraped(db: dict, scraped_records: list) -> dict:
 
 def merge_card_metadata(db: dict, card_records: list) -> dict:
     """
-    Merge Bedrock model-card metadata into existing DB entries.
-    Only updates card fields; never touches lifecycle fields.
-    If the model ID isn't in the DB yet, adds a skeleton entry.
+    Merge Bedrock model-card records into the DB. Cards are now a full tracking
+    source: for models absent from the lifecycle page (e.g. brand-new active
+    ones) the card supplies the EOL date and lifecycle stage too.
+
+    - New model: add with the card's shutdown_date / lifecycle_stage / metadata.
+    - Existing model: always refresh card metadata; fill shutdown_date,
+      lifecycle_stage and source_url ONLY if the lifecycle page (the dedicated
+      deprecation source, merged first) didn't already set them — so a concrete
+      EOL date is never overwritten by a card's "N/A".
     """
     today = datetime.now().strftime('%Y-%m-%d')
     for record in card_records:
@@ -92,11 +98,22 @@ def merge_card_metadata(db: dict, card_records: list) -> dict:
             db[key] = {
                 'provider': 'AWS Bedrock',
                 'model': record['model_id'],
-                'shutdown_date': '',
+                'shutdown_date': record.get('shutdown_date', '') or '',
                 'source_url': record.get('model_card_url', ''),
                 'first_seen': today,
                 'last_seen': today,
             }
+            if record.get('lifecycle_stage'):
+                db[key]['lifecycle_stage'] = record['lifecycle_stage']
+        else:
+            rec = db[key]
+            if not rec.get('shutdown_date') and record.get('shutdown_date'):
+                rec['shutdown_date'] = record['shutdown_date']
+            if not rec.get('lifecycle_stage') and record.get('lifecycle_stage'):
+                rec['lifecycle_stage'] = record['lifecycle_stage']
+            if not rec.get('source_url') and record.get('model_card_url'):
+                rec['source_url'] = record['model_card_url']
+            rec['last_seen'] = today
         for field in _CARD_FIELDS:
             if field in record and record[field]:
                 db[key][field] = record[field]
