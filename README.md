@@ -2,6 +2,18 @@
 
 Scrapes LLM model deprecation and retirement dates from provider documentation, matches them against your list of active models, maintains a persistent local database, and exports results to Google Sheets with risk-based colour coding.
 
+## Before You Start (please read)
+
+To run this on your own computer you need one extra file: **`credentials.json`**. This is the key that lets the script write to our Google Sheet. It is a secret, so it is deliberately **not** included in this project.
+
+1. **Ask Ben (bnguyen@studiosity.com) for the `credentials.json` file.**
+2. **Save it in the main folder of this project** — the same folder as this README. That's all; the script finds it automatically.
+3. **Never share `credentials.json` or commit it anywhere.** It's already ignored by git so it won't be uploaded by accident.
+
+**We all write to the same Google Sheet — on purpose.** The sheet is already set in the code, so everyone's results go to one shared place. Please **do not change the sheet ID** in `src/main.py` and **do not create your own sheet**. If we each used a different sheet we'd end up with scattered, out-of-date information instead of one view everyone can trust. Feel free to run the script regularly to keep that shared sheet current.
+
+Once `credentials.json` is in place, follow the [Setup](#setup) and [Usage](#usage) sections below.
+
 ## Supported Providers
 
 | Provider | Source page |
