@@ -4,15 +4,15 @@ Scrapes LLM model deprecation and retirement dates from provider documentation, 
 
 ## Before You Start (please read)
 
-To run this on your own computer you need one extra file: **`credentials.json`**. This is the key that lets the script write to our Google Sheet. It is a secret, so it is deliberately **not** included in this project.
+To run this on your own computer you need one file: **`credentials.json`**. This is the key that lets the script sign in to Google and write to our shared sheet. For security, everyone uses **their own** key — it is never passed around between people, and it is never committed to this project (git ignores it).
 
-1. **Ask Ben (bnguyen@studiosity.com) for the `credentials.json` file.**
-2. **Save it in the main folder of this project** — the same folder as this README. That's all; the script finds it automatically.
-3. **Never share `credentials.json` or commit it anywhere.** It's already ignored by git so it won't be uploaded by accident.
+Two one-time steps:
 
-**We all write to the same Google Sheet — on purpose.** The sheet is already set in the code, so everyone's results go to one shared place. Please **do not change the sheet ID** in `src/main.py` and **do not create your own sheet**. If we each used a different sheet we'd end up with scattered, out-of-date information instead of one view everyone can trust. Feel free to run the script regularly to keep that shared sheet current.
+1. **Create your own `credentials.json`.** Follow [Setup](#setup) steps 3–4 below: in a Google Cloud project turn on the Google Sheets and Drive APIs, create a service account, and download its JSON key. Save that file in the main folder of this project (the same folder as this README) and name it exactly `credentials.json`. The script finds it automatically.
 
-Once `credentials.json` is in place, follow the [Setup](#setup) and [Usage](#usage) sections below.
+2. **Get your key access to the shared sheet.** Open your `credentials.json` and copy the `client_email` value — it looks like `something@your-project.iam.gserviceaccount.com`. Send that address to Ben (bnguyen@studiosity.com), and he'll share the team sheet with it so your key is allowed to write. (You only do this once.)
+
+**We all write to the same Google Sheet — on purpose.** The sheet is already set in the code, so everyone's results go to one shared place. Please **do not change the sheet ID** in `src/main.py` and **do not create your own sheet** — if we each used a different one we'd end up with scattered, out-of-date data instead of one view everyone can trust. Once your key has access, run the script whenever you like to keep the shared sheet current (see [Usage](#usage)).
 
 ## Supported Providers
 
