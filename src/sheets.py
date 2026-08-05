@@ -13,12 +13,14 @@ def _get_or_create_worksheet(spreadsheet, title, index):
         return spreadsheet.add_worksheet(title=title, rows=1000, cols=20, index=index)
 
 
-def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, risk_col_index):
+def _write_sheet(spreadsheet, sheet, headers, rows, cell_colors, last_col_index):
     """
     Clear, write all data, and apply all formatting in a single batch_update call.
-    Only the Risk Level cell is colored (not the whole row).
-    Keeps API write requests to 3 per sheet regardless of row count, avoiding
-    the 60-writes/min quota limit.
+
+    cell_colors is one dict per data row, mapping a column index to a colour —
+    so a row can highlight several cells (risk level, usage, staleness) rather
+    than just one. Keeps API write requests to 3 per sheet regardless of row
+    count, avoiding the 60-writes/min quota limit.
     """
     num_cols = last_col_index + 1
     sheet_id = sheet.id
@@ -71,16 +73,18 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, 
         }
     })
 
-    # Risk Level cell only: color just that one column per row (skip if no risk column)
-    if risk_col_index is not None:
-        for i, color in enumerate(row_colors):
-            row_idx = i + 1  # 0-based; row 0 is the header
+    # Colour individual cells: one repeatCell per (row, column) that needs it
+    for i, colors in enumerate(cell_colors):
+        if not colors:
+            continue
+        row_idx = i + 1  # 0-based; row 0 is the header
+        for col_idx, color in sorted(colors.items()):
             requests.append({
                 'repeatCell': {
                     'range': {
                         'sheetId': sheet_id,
                         'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
-                        'startColumnIndex': risk_col_index, 'endColumnIndex': risk_col_index + 1,
+                        'startColumnIndex': col_idx, 'endColumnIndex': col_idx + 1,
                     },
                     'cell': {'userEnteredFormat': {'backgroundColor': color}},
                     'fields': 'userEnteredFormat.backgroundColor',
@@ -99,6 +103,10 @@ _USAGE_COLORS = {
 }
 _NEUTRAL_COLOR = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
 
+# Light pink: this row's figure was NOT re-confirmed by the provider on this run,
+# so it is a last-known value. The most important warning on the sheet.
+_STALE_COLOR = {'red': 1.0, 'green': 0.85, 'blue': 0.90}
+
 
 def _usage_lookup(scan):
     """
@@ -116,7 +124,7 @@ def _usage_lookup(scan):
 
 
 def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_models,
-                            spreadsheet_id, scan=None):
+                            spreadsheet_id, scan=None, scrape_stats=None):
     """
     Export to Google Sheets with up to four tabs:
       - 'All Models'       : every model scraped from all provider pages
@@ -130,6 +138,10 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         spreadsheet_id:      Google Sheets ID (from the URL: /spreadsheets/d/<ID>/edit)
         scan:                Optional result from scanner.scan_projects(), used to
                              fill the Projects/Usage columns and the Model Usage tab
+        scrape_stats:        Optional {provider: record_count} from
+                             parse_all_deprecations(). A count of 0 means that
+                             provider's scrape failed, so its rows are flagged
+                             pink as last-known rather than current values.
 
     Setup:
         1. pip install gspread google-auth
@@ -180,9 +192,9 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 item.get('first_seen', ''),
                 item.get('last_seen', ''),
             ])
-            all_colors.append(color)
+            all_colors.append({6: color})  # colour the Risk Level cell
         _write_sheet(spreadsheet, all_sheet, all_headers, all_rows, all_colors,
-                     last_col_index=9, risk_col_index=6)
+                     last_col_index=9)
         print(f"  'All Models' sheet updated: {len(all_rows)} models across all providers")
 
         # ── Sheet 2: Interested Models ───────────────────────────────────────
@@ -199,19 +211,43 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             'Source Confirmed', 'Source URL',
         ]
         today = datetime.now(melbourne_tz).strftime('%Y-%m-%d')
+        scrape_stats = scrape_stats or {}
+        # Providers whose scrape returned nothing this run — their models are all
+        # showing last-known values.
+        failed_providers = {p for p, n in scrape_stats.items() if n == 0}
+
+        # Column indexes used for cell colouring
+        _LAST_UPDATED_COL, _RISK_COL, _USAGE_COL, _CONFIRMED_COL = 0, 7, 10, 11
+
         interested_rows, interested_colors = [], []
+        stale_count = 0
         for row in deprecation_matches:
             parsed_date, days_remaining, risk_level, color = calculate_risk_info(row['Shutdown Date'])
             projects, providers, usage_status = usage.get(row['Our Model'], ('', '', ''))
-            # Flag figures the provider page didn't re-confirm on this run — they
-            # are last-known values, not current ones.
+
+            # Work out whether this figure is current, and if not, why not.
             seen = row.get('Last Seen', '')
-            confirmed = 'This run' if seen == today else (f"Stale — {seen}" if seen else 'Unknown')
+            provider = row.get('Provider', '')
+            if provider in failed_providers:
+                confirmed = f'COULD NOT FETCH {provider}'
+                is_stale = True
+            elif seen == today:
+                confirmed = 'This run'
+                is_stale = False
+            elif seen:
+                confirmed = f'Stale — last seen {seen}'
+                is_stale = True
+            else:
+                confirmed = 'Unknown'
+                is_stale = True
+            if is_stale:
+                stale_count += 1
+
             interested_rows.append([
                 last_updated,
                 row['Our Model'],
                 row['Scraped Model'],
-                row['Provider'],
+                provider,
                 row['Shutdown Date'],
                 parsed_date if days_remaining != 'N/A' else 'N/A',
                 str(days_remaining),
@@ -222,7 +258,17 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 confirmed,
                 row.get('Source URL', ''),
             ])
-            interested_colors.append(color)
+            colors = {
+                _RISK_COL: color,
+                _USAGE_COL: _USAGE_COLORS.get(usage_status, _NEUTRAL_COLOR),
+            }
+            if is_stale:
+                # Pink on both the timestamp and the reason, so a stale row is
+                # obvious at a glance no matter which column you're reading.
+                colors[_LAST_UPDATED_COL] = _STALE_COLOR
+                colors[_CONFIRMED_COL] = _STALE_COLOR
+            interested_colors.append(colors)
+
         # Append unmatched models as grey rows so they're visible but clearly
         # unfound. 'Provider (config)' still tells us where they're hosted.
         _NOT_FOUND_COLOR = {'red': 0.88, 'green': 0.88, 'blue': 0.88}
@@ -232,11 +278,19 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 last_updated, model, '', '', 'Not found', 'N/A', 'N/A', 'Not found',
                 projects, providers, usage_status, 'Not on any provider page', '',
             ])
-            interested_colors.append(_NOT_FOUND_COLOR)
+            interested_colors.append({
+                _RISK_COL: _NOT_FOUND_COLOR,
+                _USAGE_COL: _USAGE_COLORS.get(usage_status, _NEUTRAL_COLOR),
+            })
 
-        _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
-                     last_col_index=12, risk_col_index=7)
+        _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows,
+                     interested_colors, last_col_index=12)
         print(f"  'Interested Models' sheet updated: {len(deprecation_matches)} matched, {len(unmatched_models)} not found")
+        if stale_count:
+            print(f"  !! {stale_count} row(s) highlighted PINK — the provider did not")
+            print(f"  !! re-confirm these on this run, so they are last-known values.")
+            if failed_providers:
+                print(f"  !! Scrape returned nothing for: {', '.join(sorted(failed_providers))}")
 
         # ── Sheet 3: Model Usage ─────────────────────────────────────────────
         # One row per model per project: is it declared, is it referenced, and
@@ -261,10 +315,9 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                     status,
                     r.get('evidence', ''),
                 ])
-                usage_colors.append(_USAGE_COLORS.get(status, _NEUTRAL_COLOR))
-            # Colour the Usage column (index 5)
+                usage_colors.append({5: _USAGE_COLORS.get(status, _NEUTRAL_COLOR)})
             _write_sheet(spreadsheet, usage_sheet, usage_headers, usage_rows, usage_colors,
-                         last_col_index=6, risk_col_index=5)
+                         last_col_index=6)
             skipped = scan.get('skipped') or []
             note = f", {len(skipped)} project(s) skipped" if skipped else ''
             print(f"  'Model Usage' sheet updated: {len(usage_rows)} model/project rows{note}")
@@ -298,10 +351,9 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                     ', '.join(item['geo_inference_ids']) if item.get('geo_inference_ids') else '',
                     item.get('model_card_url', ''),
                 ])
-                details_colors.append(_neutral)
-            # No risk column on this sheet — pass risk_col_index=None
+                details_colors.append({})  # no cells need colouring on this tab
             _write_sheet(spreadsheet, details_sheet, details_headers, details_rows, details_colors,
-                         last_col_index=8, risk_col_index=None)
+                         last_col_index=8)
             print(f"  'Bedrock Details' sheet updated: {len(details_rows)} models with card metadata")
 
         print(f"\n  Successfully exported to Google Sheets!")

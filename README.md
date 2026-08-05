@@ -135,8 +135,20 @@ Every model found by the repo scan. Unmatched models appear at the bottom in gre
 | Projects | Which of our products declare it, comma-separated |
 | Provider (config) | The provider our own config declares — filled in even when the model isn't on any provider page |
 | Usage | `Production` / `Test only` / `Config only` — filter on this |
-| Source Confirmed | `This run` if the provider page still listed this model on the latest run. `Stale — <date>` means the model has dropped off the provider's page, so the date beside it is a last-known value that is no longer being re-verified. Check these before acting on them. |
+| Source Confirmed | Whether the date is current. `This run` = the provider page still listed it. `COULD NOT FETCH <provider>` = that provider's whole scrape failed, so this is a last-known value — the parser probably needs fixing. `Stale — last seen <date>` = the model has dropped off the provider's page. The last two are highlighted **pink**, along with `Last Updated`. |
 | Source URL | The exact provider page the date came from, so any figure can be traced back |
+
+### When a provider changes their page
+
+This is the failure mode that matters most. If a provider quietly rewrites their documentation, a scraper stops finding anything — and because the local database keeps its last-known values, **everything still looks fine while silently going out of date**. That is exactly what happened once: Anthropic changed a column heading from `API Model Name` to `API model name`, the parser matched on the exact string, and 14 models sat unnoticed with four-month-old dates.
+
+Three things now guard against it:
+
+1. **A scrape that returns nothing is treated as a failure, not as "no news."** Each run counts the records per provider, and any provider returning zero triggers a loud warning in the console naming that provider.
+2. **Affected rows are highlighted pink in the sheet** — both the `Last Updated` cell and `Source Confirmed`, which reads `COULD NOT FETCH <provider>`. A stale row cannot be mistaken for a current one.
+3. **Column headings are matched loosely** (case- and whitespace-insensitive, via `pick_column` in `src/utils.py`), so a cosmetic edit to a provider's table no longer breaks the scrape.
+
+If you see pink, don't act on that row's date until the parser is fixed — open its Source URL and check the provider directly.
 
 ### How to tell whether a date is trustworthy
 

@@ -27,8 +27,10 @@ if __name__ == "__main__":
     scan = scan_projects()
     my_models = models_to_track(scan, EXTRA_MODELS)
 
-    # 2. Scrape all provider deprecation pages
-    scraped = parse_all_deprecations()
+    # 2. Scrape all provider deprecation pages. scrape_stats tells us if any
+    #    provider returned nothing, which means a broken parser rather than a
+    #    provider with no news — those rows get flagged in the sheet.
+    scraped, scrape_stats = parse_all_deprecations()
 
     # 3. Scrape Bedrock model card metadata (context window, modalities, etc.)
     card_metadata = scrape_bedrock_model_cards()
@@ -53,4 +55,5 @@ if __name__ == "__main__":
     matches, unmatched = check_my_models(my_models, all_records, model_providers)
 
     # 6. Export to Google Sheets (All Models always reflects full DB)
-    export_to_google_sheets(all_records, matches, unmatched, SPREADSHEET_ID, scan)
+    export_to_google_sheets(all_records, matches, unmatched, SPREADSHEET_ID,
+                            scan, scrape_stats)

@@ -25,6 +25,25 @@ def get_html(url):
     return response.text
 
 
+def pick_column(df, *candidates):
+    """
+    Find a column in a DataFrame, ignoring case and surrounding whitespace.
+
+    Providers rewrite their table headings without warning — Anthropic silently
+    changed "API Model Name" to "API model name", which broke an exact-match
+    lookup and left four months of stale data behind. Matching loosely means a
+    cosmetic edit no longer breaks the scrape.
+
+    Returns the real column name, or None if none of the candidates are present.
+    """
+    normalised = {str(c).strip().lower(): c for c in df.columns}
+    for name in candidates:
+        hit = normalised.get(name.strip().lower())
+        if hit is not None:
+            return hit
+    return None
+
+
 def parse_shutdown_date(date_string):
     """
     Parse shutdown date string to datetime object.

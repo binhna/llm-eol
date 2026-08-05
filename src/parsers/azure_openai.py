@@ -1,6 +1,6 @@
 import pandas as pd
 from io import StringIO
-from utils import get_html
+from utils import get_html, pick_column
 
 # Microsoft split this into two pages. The one we want is the *schedule*, which
 # is the canonical list of dates ("For specific retirement dates, see Model
@@ -21,14 +21,6 @@ _LIFECYCLE_COLS = ('Lifecycle',)
 _NO_DATE_VALUES = {'', '-', '—', '–', 'nan', 'none', 'n/a'}
 
 
-def _pick(df, names):
-    """Return the first column present in df from `names`, else None."""
-    for n in names:
-        if n in df.columns:
-            return n
-    return None
-
-
 def parse_azure_openai():
     """
     Parse the Azure / Microsoft Foundry model retirement schedule.
@@ -44,12 +36,12 @@ def parse_azure_openai():
         dfs = pd.read_html(StringIO(html))
         for df in dfs:
             df.columns = [str(c).strip() for c in df.columns]
-            model_col = _pick(df, _MODEL_COLS)
-            date_col = _pick(df, _DATE_COLS)
+            model_col = pick_column(df, *_MODEL_COLS)
+            date_col = pick_column(df, *_DATE_COLS)
             if not model_col or not date_col:
                 continue
-            version_col = _pick(df, _VERSION_COLS)
-            lifecycle_col = _pick(df, _LIFECYCLE_COLS)
+            version_col = pick_column(df, *_VERSION_COLS)
+            lifecycle_col = pick_column(df, *_LIFECYCLE_COLS)
 
             for _, row in df.iterrows():
                 model = str(row[model_col]).strip()
