@@ -74,6 +74,25 @@ Each model lands in one of three buckets. They answer **"where is this model ref
 | **Test only** | Referenced, but only from tests, experiments, dev scripts or reporting |
 | **Config only** | Declared in the config, referenced nowhere else in the repo |
 
+#### How Production vs Test only is decided — and how it can be wrong
+
+This is a **convention-based guess**, not something the repos declare. It works by looking at the folder a reference sits in: directory names like `tests`, `experiments`, `dev`, `uat`, `reporting`, `simulation`, `notebooks`, `benchmarks`, `sandbox` and `training` count as non-production, and **anything else counts as production**.
+
+Names are matched as whole path segments, so `dev` catches `dev/compare.py` but not `devices/driver.py`. Certain file types are never production wherever they sit — `.md`, `.ipynb`, `.csv`, `.jsonl`, and `test_*` / `*_test` / `conftest` files.
+
+**The default direction is deliberate.** If a folder isn't recognised, its references read as *production*. For end-of-life tracking, wrongly calling something production is harmless noise, while wrongly calling a live model "test only" could get a real dependency ignored. So when adding to the list, only include names that are unambiguous.
+
+**What happens when a repo adds something new:**
+
+- A new **production** folder (e.g. `src/newservice/`) is classified correctly with no change needed.
+- A new **non-production** folder we don't know about (e.g. `spikes/`, `bench2/`) will read as production. To make that visible rather than silent, every run prints which top-level folders it counted as production:
+  ```
+  Counted as production — bellmere: src; bordertown: src; burley: src; norval: src
+  ```
+  If an unexpected name appears there, add it to `NON_PRODUCTION_DIRS` in `src/scanner.py`, or to that project's `extra_non_production` list in `PROJECTS`.
+
+**The backstop is the Evidence column.** Every classification shows the exact `file:line` it was based on, so you can always check the verdict yourself instead of trusting the heuristic.
+
 The scanner also records the **provider** each config declares (`azure`, `google`, `anthropic`, `mistral`, `bedrock`). That matters for two reasons: it tells you where a model is hosted even when no provider page mentions it, and it decides which date wins when the same model appears on several platforms — `claude-3-5-haiku` retires February 2026 on Anthropic's own API but July 2026 on Vertex AI, and only the platform you actually call is relevant.
 
 > **"Config only" does not mean safe to ignore.** These projects pick models by *name* at runtime, so any declared model goes live by editing one prompt file — no code change, no deploy. That is exactly why we still track its end-of-life date.

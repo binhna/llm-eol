@@ -43,6 +43,7 @@ tools beyond git itself.
 """
 from __future__ import annotations
 
+import collections
 import json
 import re
 import subprocess
@@ -124,15 +125,55 @@ MIRROR_DIR = '.cache/repos'
 # offline from whatever the mirrors already hold.
 REFRESH_MIRRORS = True
 
-# A hit in a path containing any of these is treated as non-production.
-NON_PRODUCTION_MARKERS = (
-    '/test', 'test_', 'tests/', 'conftest',
-    'experiment', '/dev/', 'dev_scripts/', '/uat/',
-    'reporting/', 'simulation/', 'simulators/',
-    'notebook', '.ipynb', 'eval_results/', 'performance/',
-    'cloudwatch_logs/', '/docs/', '.md', '.jsonl', '.csv',
-    'training/',  # data-generation pipelines, not request serving
+# ── Deciding whether a reference is production or not ─────────────────────────
+# This is a convention-based guess, not something the repos declare, so it is
+# worth understanding how it fails.
+#
+# Directory names below are matched as WHOLE PATH SEGMENTS. That matters: an
+# earlier version matched the substring '/dev/', which silently missed
+# bordertown's top-level 'dev/' folder because there is no leading slash. Segment
+# matching also avoids the opposite mistake — 'dev' will not match 'devices/'.
+#
+# Anything not listed here counts as production. That default is deliberate: for
+# end-of-life tracking, wrongly calling something production is harmless noise,
+# while wrongly calling a live model "test only" could get a real dependency
+# ignored. So keep this list to names that are unambiguous — when in doubt, leave
+# a directory out and let it read as production.
+#
+# Add project-specific folders with an 'extra_non_production' key in PROJECTS.
+NON_PRODUCTION_DIRS = frozenset({
+    'test', 'tests', 'testing', 'fixtures', 'mocks', 'stubs',
+    'experiment', 'experiments',
+    'dev', 'dev_scripts', 'devcontainer', 'uat',
+    'reporting', 'reports',
+    'simulation', 'simulations', 'simulator', 'simulators',
+    'notebook', 'notebooks',
+    'eval', 'evals', 'eval_results', 'benchmark', 'benchmarks',
+    'performance', 'perf', 'cloudwatch_logs',
+    'doc', 'docs', 'example', 'examples', 'samples',
+    'sandbox', 'playground', 'poc', 'scratch', 'tmp',
+    'training',  # data-generation pipelines, not request serving
+})
+
+# File names/extensions that are never production code, wherever they sit.
+NON_PRODUCTION_FILE_RE = re.compile(
+    r'(?:^|/)(?:conftest|test_[^/]*|[^/]*_test)\.[a-z0-9]+$'
+    r'|\.(?:ipynb|md|markdown|jsonl|csv|log|txt|rst)$',
+    re.IGNORECASE,
 )
+
+
+def _is_production_path(path: str, extra_dirs: frozenset = frozenset()) -> bool:
+    """
+    True if a reference at `path` looks like production code.
+
+    `path` is repo-relative, e.g. 'src/bordertown/agents/segmentation_agent.py'.
+    """
+    if NON_PRODUCTION_FILE_RE.search(path):
+        return False
+    segments = [s.lower() for s in path.split('/')[:-1]]  # directories only
+    blocked = NON_PRODUCTION_DIRS | extra_dirs
+    return not any(s in blocked for s in segments)
 
 # Never evidence of use, in any project: dependency lock files pin package
 # versions and sometimes contain strings that look like model names.
@@ -355,16 +396,22 @@ def _search(model: str, project: dict, repo: Path, ref: str) -> list[str]:
     return hits
 
 
-def _classify(hits: list[str]) -> tuple[str, str]:
-    """Return (status, evidence) for a model's search hits."""
+def _classify(hits: list[str], extra_dirs: frozenset = frozenset()) -> tuple[str, str]:
+    """
+    Return (status, evidence) for a model's search hits.
+
+    Evidence is the single most convincing reference: a production one if any
+    exists, preferring paths under a source directory over loose top-level files
+    so the evidence shown is the one a reader would find most meaningful.
+    """
     if not hits:
         return STATUS_CONFIG_ONLY, ''
 
-    production = [h for h in hits
-                  if not any(m in h.lower() for m in NON_PRODUCTION_MARKERS)]
+    production = [h for h in hits if _is_production_path(h.rsplit(':', 1)[0], extra_dirs)]
     if production:
+        production.sort(key=lambda h: (0 if h.startswith('src/') else 1, h))
         return STATUS_USED, production[0]
-    return STATUS_TEST, hits[0]
+    return STATUS_TEST, sorted(hits)[0]
 
 
 def scan_projects(projects: list[dict] | None = None, root: Path | None = None) -> dict:
@@ -393,6 +440,7 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
     rows: list[dict] = []
     scanned: list[str] = []
     skipped: list[tuple[str, str]] = []
+    production_dirs: dict[str, set] = collections.defaultdict(set)
 
     print("Scanning product repos for model usage...")
 
@@ -421,13 +469,22 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
         aliases = project.get('aliases', {})
         print(f"  [{name}] {len(declared)} models declared in {project['config']} — {where}")
 
+        extra_dirs = frozenset(d.lower() for d in project.get('extra_non_production', ()))
+
         for raw_name, provider in declared:
             model = aliases.get(raw_name, raw_name)
             # search for the config key, and for the resolved name if different
             hits = _search(raw_name, project, repo, ref)
             if model != raw_name:
                 hits += _search(model, project, repo, ref)
-            status, evidence = _classify(hits)
+            status, evidence = _classify(hits, extra_dirs)
+
+            # Remember which folders we treated as production, so a directory
+            # nobody has classified yet can be reported rather than assumed.
+            for hit in hits:
+                path = hit.rsplit(':', 1)[0]
+                if '/' in path and _is_production_path(path, extra_dirs):
+                    production_dirs[project['name']].add(path.split('/')[0])
 
             entry = models.setdefault(model, {
                 'declared_in': [], 'used_in': [], 'providers': [], 'per_project': {},
@@ -464,7 +521,23 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
     print(f"  Found {len(models)} distinct models across {len(scanned)} project(s)"
           + (f" — {summary}" if summary else ''))
 
-    return {'models': models, 'rows': rows, 'scanned': scanned, 'skipped': skipped}
+    # Show which top-level folders counted as production. If a repo adds a new
+    # folder that is really tests or a sandbox, it shows up here as production
+    # and can be added to NON_PRODUCTION_DIRS or the project's
+    # 'extra_non_production' list. Without this the misread would be invisible.
+    if production_dirs:
+        listed = '; '.join(
+            f"{proj}: {', '.join(sorted(dirs))}"
+            for proj, dirs in sorted(production_dirs.items())
+        )
+        print(f"  Counted as production — {listed}")
+        print("  (if any of those are really tests or scratch work, add them to"
+              " NON_PRODUCTION_DIRS in src/scanner.py)")
+
+    return {
+        'models': models, 'rows': rows, 'scanned': scanned, 'skipped': skipped,
+        'production_dirs': {k: sorted(v) for k, v in production_dirs.items()},
+    }
 
 
 def models_to_track(scan: dict, extra: list[str] | None = None) -> list[str]:
