@@ -12,3 +12,7 @@ build/
 
 # Environment
 .env
+
+# Private bare mirrors of the product repos, rebuilt on demand.
+# Never contains anyone's working files — history only, no working tree.
+.cache/

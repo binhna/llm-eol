@@ -91,16 +91,44 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, 
         spreadsheet.batch_update({'requests': requests})
 
 
-def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_models, spreadsheet_id):
+# Usage-status colours for the 'Model Usage' tab and the Usage column
+_USAGE_COLORS = {
+    'Used':            {'red': 0.76, 'green': 0.93, 'blue': 0.76},  # soft mint
+    'Test/Experiment': {'red': 1.0,  'green': 0.97, 'blue': 0.78},  # pale yellow
+    'Config only':     {'red': 0.88, 'green': 0.88, 'blue': 0.88},  # light grey
+}
+_NEUTRAL_COLOR = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
+
+
+def _usage_lookup(scan):
     """
-    Export to Google Sheets with two tabs:
+    Build {model: (projects_string, usage_status)} from a scanner result.
+    Returns an empty dict when no scan was supplied.
+    """
+    if not scan or not scan.get('models'):
+        return {}
+    out = {}
+    for model, entry in scan['models'].items():
+        projects = ', '.join(sorted(entry.get('declared_in', [])))
+        out[model] = (projects, entry.get('status', ''))
+    return out
+
+
+def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_models,
+                            spreadsheet_id, scan=None):
+    """
+    Export to Google Sheets with up to four tabs:
       - 'All Models'       : every model scraped from all provider pages
-      - 'Interested Models': only models that matched your my_used_models list
+      - 'Interested Models': the models we track, with Projects + Usage columns
+      - 'Model Usage'      : per-project config-vs-code breakdown (needs `scan`)
+      - 'Bedrock Details'  : AWS Bedrock model-card metadata
 
     Args:
         all_deprecations:    Full list returned by parse_all_deprecations()
         deprecation_matches: Filtered list returned by check_my_models()
         spreadsheet_id:      Google Sheets ID (from the URL: /spreadsheets/d/<ID>/edit)
+        scan:                Optional result from scanner.scan_projects(), used to
+                             fill the Projects/Usage columns and the Model Usage tab
 
     Setup:
         1. pip install gspread google-auth
@@ -157,16 +185,20 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         print(f"  'All Models' sheet updated: {len(all_rows)} models across all providers")
 
         # ── Sheet 2: Interested Models ───────────────────────────────────────
-        # Columns A-H (indices 0-7); Risk Level = col H (index 7)
+        # Columns A-J (indices 0-9); Risk Level = col H (index 7)
+        # 'Projects' and 'Usage' come from the repo scan so you can filter by
+        # which product uses a model, and by whether it is actually used.
+        usage = _usage_lookup(scan)
         interested_sheet = _get_or_create_worksheet(spreadsheet, 'Interested Models', index=1)
         interested_headers = [
             'Last Updated', 'Our Model', 'Scraped Model', 'Provider',
             'Scraped Shutdown Date', 'Parsed Shutdown Date',
-            'Days Remaining', 'Risk Level',
+            'Days Remaining', 'Risk Level', 'Projects', 'Usage',
         ]
         interested_rows, interested_colors = [], []
         for row in deprecation_matches:
             parsed_date, days_remaining, risk_level, color = calculate_risk_info(row['Shutdown Date'])
+            projects, usage_status = usage.get(row['Our Model'], ('', ''))
             interested_rows.append([
                 last_updated,
                 row['Our Model'],
@@ -176,28 +208,62 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 parsed_date if days_remaining != 'N/A' else 'N/A',
                 str(days_remaining),
                 risk_level,
+                projects,
+                usage_status,
             ])
             interested_colors.append(color)
         # Append unmatched models as grey rows so they're visible but clearly unfound
         _NOT_FOUND_COLOR = {'red': 0.88, 'green': 0.88, 'blue': 0.88}
         for model in unmatched_models:
+            projects, usage_status = usage.get(model, ('', ''))
             interested_rows.append([
                 last_updated, model, '', '', 'Not found', 'N/A', 'N/A', 'Not found',
+                projects, usage_status,
             ])
             interested_colors.append(_NOT_FOUND_COLOR)
 
         _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
-                     last_col_index=7, risk_col_index=7)
+                     last_col_index=9, risk_col_index=7)
         print(f"  'Interested Models' sheet updated: {len(deprecation_matches)} matched, {len(unmatched_models)} not found")
 
-        # ── Sheet 3: Bedrock Details ─────────────────────────────────────────
+        # ── Sheet 3: Model Usage ─────────────────────────────────────────────
+        # One row per model per project: is it declared, is it referenced, and
+        # where. Only written when a scan was supplied.
+        next_index = 2
+        if scan and scan.get('rows'):
+            usage_sheet = _get_or_create_worksheet(spreadsheet, 'Model Usage', index=next_index)
+            next_index += 1
+            usage_headers = [
+                'Model', 'Project', 'Declared In Config', 'Referenced In Code',
+                'Usage', 'Evidence (file:line)',
+            ]
+            usage_rows, usage_colors = [], []
+            for r in sorted(scan['rows'], key=lambda x: (x['model'], x['project'])):
+                status = r.get('status', '')
+                usage_rows.append([
+                    r.get('model', ''),
+                    r.get('project', ''),
+                    'Yes',  # every row here came from a project's model config
+                    'No' if status == 'Config only' else 'Yes',
+                    status,
+                    r.get('evidence', ''),
+                ])
+                usage_colors.append(_USAGE_COLORS.get(status, _NEUTRAL_COLOR))
+            # Colour the Usage column (index 4)
+            _write_sheet(spreadsheet, usage_sheet, usage_headers, usage_rows, usage_colors,
+                         last_col_index=5, risk_col_index=4)
+            skipped = scan.get('skipped') or []
+            note = f", {len(skipped)} project(s) skipped" if skipped else ''
+            print(f"  'Model Usage' sheet updated: {len(usage_rows)} model/project rows{note}")
+
+        # ── Sheet 4: Bedrock Details ─────────────────────────────────────────
         # Only rows from AWS Bedrock that have model-card metadata
         bedrock_rows_with_meta = [
             r for r in all_deprecations
             if r.get('provider') == 'AWS Bedrock' and r.get('model_card_url')
         ]
         if bedrock_rows_with_meta:
-            details_sheet = _get_or_create_worksheet(spreadsheet, 'Bedrock Details', index=2)
+            details_sheet = _get_or_create_worksheet(spreadsheet, 'Bedrock Details', index=next_index)
             details_headers = [
                 'Model ID', 'Lifecycle Stage',
                 'Context Window', 'Max Output Tokens',
