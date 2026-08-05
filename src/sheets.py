@@ -196,11 +196,17 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             'Scraped Shutdown Date', 'Parsed Shutdown Date',
             'Days Remaining', 'Risk Level',
             'Projects', 'Provider (config)', 'Usage',
+            'Source Confirmed', 'Source URL',
         ]
+        today = datetime.now(melbourne_tz).strftime('%Y-%m-%d')
         interested_rows, interested_colors = [], []
         for row in deprecation_matches:
             parsed_date, days_remaining, risk_level, color = calculate_risk_info(row['Shutdown Date'])
             projects, providers, usage_status = usage.get(row['Our Model'], ('', '', ''))
+            # Flag figures the provider page didn't re-confirm on this run — they
+            # are last-known values, not current ones.
+            seen = row.get('Last Seen', '')
+            confirmed = 'This run' if seen == today else (f"Stale — {seen}" if seen else 'Unknown')
             interested_rows.append([
                 last_updated,
                 row['Our Model'],
@@ -213,6 +219,8 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 projects,
                 providers,
                 usage_status,
+                confirmed,
+                row.get('Source URL', ''),
             ])
             interested_colors.append(color)
         # Append unmatched models as grey rows so they're visible but clearly
@@ -222,12 +230,12 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             projects, providers, usage_status = usage.get(model, ('', '', ''))
             interested_rows.append([
                 last_updated, model, '', '', 'Not found', 'N/A', 'N/A', 'Not found',
-                projects, providers, usage_status,
+                projects, providers, usage_status, 'Not on any provider page', '',
             ])
             interested_colors.append(_NOT_FOUND_COLOR)
 
         _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
-                     last_col_index=10, risk_col_index=7)
+                     last_col_index=12, risk_col_index=7)
         print(f"  'Interested Models' sheet updated: {len(deprecation_matches)} matched, {len(unmatched_models)} not found")
 
         # ── Sheet 3: Model Usage ─────────────────────────────────────────────

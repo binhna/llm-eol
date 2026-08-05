@@ -135,6 +135,19 @@ Every model found by the repo scan. Unmatched models appear at the bottom in gre
 | Projects | Which of our products declare it, comma-separated |
 | Provider (config) | The provider our own config declares — filled in even when the model isn't on any provider page |
 | Usage | `Production` / `Test only` / `Config only` — filter on this |
+| Source Confirmed | `This run` if the provider page still listed this model on the latest run. `Stale — <date>` means the model has dropped off the provider's page, so the date beside it is a last-known value that is no longer being re-verified. Check these before acting on them. |
+| Source URL | The exact provider page the date came from, so any figure can be traced back |
+
+### How to tell whether a date is trustworthy
+
+Every date is scraped from the vendor's own documentation for the platform the model is hosted on — Microsoft Learn for `azure`, AWS docs for `bedrock`, and so on. Two columns let you check any figure yourself:
+
+- **Source URL** — the page it came from. Open it and confirm.
+- **Source Confirmed** — whether that page still listed the model on the most recent run.
+
+Records are never deleted from the local database, which is deliberate (a model vanishing from a provider page shouldn't silently lose its history) but does mean an old value can sit there looking current. `Source Confirmed` is what distinguishes the two.
+
+One limit worth knowing: providers publish **one date per model version**, not one per deployment type. If you need the exact date for a specific Azure SKU (Global Standard vs Data Zone Standard vs Provisioned), Microsoft exposes a per-SKU `deprecationDate` through the [Models API](https://learn.microsoft.com/en-us/rest/api/aiservices/accountmanagement/models), which this tool does not read.
 
 ### Model Usage (tab 3)
 

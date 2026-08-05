@@ -152,6 +152,11 @@ def check_my_models(my_models, deprecation_data, model_providers=None):
                     'Scraped Model': data['model'],
                     'Provider': data['provider'],
                     'Shutdown Date': data['shutdown_date'],
+                    # When the provider page last confirmed this record. An old
+                    # date means the model has dropped off the provider's page
+                    # and the figure beside it is no longer being re-verified.
+                    'Last Seen': data.get('last_seen', ''),
+                    'Source URL': data.get('source_url', ''),
                 })
 
         # Narrow multi-platform matches down to the platform we actually call
