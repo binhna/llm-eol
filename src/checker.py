@@ -9,16 +9,116 @@ _BEDROCK_GEO_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Providers write a version as a bracketed suffix — "gpt-4o (2024-05-13)" — while
+# our configs write it joined on — "gpt-4o-2024-05-13". Normalising the bracketed
+# form lets the two meet.
+_BRACKET_VERSION_RE = re.compile(r'^(.*?)\s*\(([^)]+)\)\s*$')
 
-def check_my_models(my_models, deprecation_data):
+# An 8-digit date suffix, as in "claude-sonnet-4-20250514". A model name plus a
+# date suffix is the same model, so "claude-sonnet-4" should match it. Crucially
+# this must NOT let "claude-sonnet-4" match "claude-sonnet-4-5-20250929", which
+# is a different model — hence requiring the suffix to be *only* a date.
+_DATE_SUFFIX_RE = re.compile(r'^-\d{8}$')
+
+
+def _normalise_bracket_version(name):
+    """'gpt-4o (2024-05-13)' -> 'gpt-4o-2024-05-13'. Returns None if no brackets."""
+    m = _BRACKET_VERSION_RE.match(name)
+    if not m:
+        return None
+    base, version = m.group(1).strip(), m.group(2).strip()
+    if not base or not version:
+        return None
+    return f"{base}-{version}"
+
+
+# The same model often appears on more than one platform with DIFFERENT dates —
+# claude-3-5-haiku retires Feb 2026 on Anthropic's own API but July 2026 on
+# Vertex AI. Only the platform we actually call matters, so the provider our
+# config declares decides which record wins. Listed best-first.
+#
+# Note 'anthropic' and 'mistral' prefer Vertex AI: in our configs those models
+# are reached through Vertex (their secret_id is google-vertex/...), not through
+# the vendor's own API.
+_CONFIG_PROVIDER_PREFERENCE = {
+    'azure': ('Azure OpenAI', 'OpenAI'),
+    'bedrock': ('AWS Bedrock',),
+    'google': ('Vertex AI', 'Google Gemini'),
+    'anthropic': ('Vertex AI', 'Anthropic', 'AWS Bedrock'),
+    'mistral': ('Vertex AI', 'Azure OpenAI', 'AWS Bedrock'),
+}
+
+
+def _preferred_matches(matches, config_provider):
+    """
+    Given every provider record a model matched, keep only those from the
+    platform we actually use. Falls back to all matches when we can't tell.
+    """
+    if not config_provider or len(matches) < 2:
+        return matches
+    preference = _CONFIG_PROVIDER_PREFERENCE.get(config_provider.lower())
+    if not preference:
+        return matches
+    for provider in preference:
+        subset = [m for m in matches if m['Provider'] == provider]
+        if subset:
+            return subset
+    return matches
+
+
+def _same_model(user_model, scraped_model):
+    """
+    Decide whether a model in our config and a model on a provider page are the
+    same thing. Both arguments must already be lower-cased.
+
+    Deliberately strict about suffixes: a longer name is a DIFFERENT model
+    ('gemini-2.5-flash' vs 'gemini-2.5-flash-lite', 'zai.glm-4.7' vs
+    'zai.glm-4.7-flash'), so we never treat one as a prefix-match of the other
+    unless the extra part is purely a version.
+    """
+    if user_model == scraped_model:
+        return True
+
+    # Provider appends a version in brackets: 'gpt-4o-mini (2024-07-18)'
+    normalised = _normalise_bracket_version(scraped_model)
+    if normalised:
+        if user_model == normalised:
+            return True
+        # 'gpt-4o-mini' should match 'gpt-4o-mini (2024-07-18)'
+        base = _BRACKET_VERSION_RE.match(scraped_model).group(1).strip()
+        if user_model == base:
+            return True
+
+    # Our config carries an explicit version tag: 'claude-3-haiku@20240307'
+    if user_model.startswith(scraped_model + '@'):
+        return True
+
+    # Provider name is our name plus a dated release: 'claude-sonnet-4-20250514'
+    if scraped_model.startswith(user_model):
+        if _DATE_SUFFIX_RE.match(scraped_model[len(user_model):]):
+            return True
+
+    return False
+
+
+def check_my_models(my_models, deprecation_data, model_providers=None):
     """
     Match each model in my_models against the scraped deprecation data.
 
-    Matching rules (applied in order, first match wins):
+    Args:
+        model_providers: optional {model: provider} from the repo scan. When a
+            model matches records on several platforms, this picks the one we
+            actually call — see _CONFIG_PROVIDER_PREFERENCE.
+
+    Matching rules (see _same_model):
       1. Exact match
-      2. Scraped model has appended info  (e.g. 'gpt-4o' matches 'gpt-4o (2024-05-13)')
-      3. User model has appended version  (e.g. 'claude-3-haiku@20240307' matches 'claude-3-haiku')
-      4. Bedrock geo-prefix strip         (e.g. 'us.meta.llama3-...' matches 'meta.llama3-...')
+      2. Bracketed version   ('gpt-4o-2024-05-13' and 'gpt-4o' both match
+                              'gpt-4o (2024-05-13)')
+      3. Version tag         ('claude-3-haiku@20240307' matches 'claude-3-haiku')
+      4. Dated release       ('claude-sonnet-4' matches 'claude-sonnet-4-20250514'
+                              but NOT 'claude-sonnet-4-5-20250929')
+      5. Bedrock geo-prefix strip, then rules 1-4 again
+                             ('us.meta.llama3-...' matches 'meta.llama3-...')
 
     Returns:
         list of match dicts with keys: Our Model, Scraped Model, Provider,
@@ -29,49 +129,35 @@ def check_my_models(my_models, deprecation_data):
     print("=" * 80)
 
     deprecation_matches = []
+    model_providers = model_providers or {}
 
     for user_model in my_models:
         user_model_lower = user_model.lower()
+        found_for_model = []
 
         for data in deprecation_data:
             scraped_model_lower = data['model'].lower()
 
-            # 1. Exact match
-            is_match = (user_model_lower == scraped_model_lower)
+            is_match = _same_model(user_model_lower, scraped_model_lower)
 
-            # 2. Scraped model has appended dates/info
-            if not is_match:
-                is_match = (
-                    scraped_model_lower.startswith(user_model_lower + " ")
-                    or scraped_model_lower.startswith(user_model_lower + " (")
-                )
-
-            # 3. User model has appended version tags
-            if not is_match:
-                is_match = (
-                    user_model_lower.startswith(scraped_model_lower + "@")
-                    or user_model_lower.startswith(scraped_model_lower + "-")
-                )
-
-            # 4. Bedrock cross-region inference prefix
+            # Bedrock cross-region inference prefix: strip it and try again
             if not is_match and data['provider'] == 'AWS Bedrock':
                 stripped = _BEDROCK_GEO_PREFIX_RE.sub('', user_model_lower)
                 if stripped != user_model_lower:
-                    is_match = (
-                        stripped == scraped_model_lower
-                        or scraped_model_lower.startswith(stripped + " ")
-                        or scraped_model_lower.startswith(stripped + " (")
-                        or stripped.startswith(scraped_model_lower + "@")
-                        or stripped.startswith(scraped_model_lower + "-")
-                    )
+                    is_match = _same_model(stripped, scraped_model_lower)
 
             if is_match:
-                deprecation_matches.append({
+                found_for_model.append({
                     'Our Model': user_model,
                     'Scraped Model': data['model'],
                     'Provider': data['provider'],
                     'Shutdown Date': data['shutdown_date'],
                 })
+
+        # Narrow multi-platform matches down to the platform we actually call
+        deprecation_matches.extend(
+            _preferred_matches(found_for_model, model_providers.get(user_model))
+        )
 
     matched_set = {r['Our Model'] for r in deprecation_matches}
     unmatched = [m for m in my_models if m not in matched_set]

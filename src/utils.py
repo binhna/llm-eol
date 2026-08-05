@@ -14,6 +14,14 @@ def get_html(url):
     }
     response = requests.get(url, headers=headers, timeout=30)
     response.raise_for_status()
+
+    # When a response has no charset in its Content-Type header, requests falls
+    # back to ISO-8859-1 for text/*, which turns UTF-8 punctuation into
+    # mojibake — an em dash "—" arrives as "â€”". Provider pages use em dashes
+    # to mean "no retirement scheduled", so getting this wrong changes results.
+    if 'charset' not in response.headers.get('Content-Type', '').lower():
+        response.encoding = response.apparent_encoding or 'utf-8'
+
     return response.text
 
 
@@ -70,15 +78,41 @@ def parse_shutdown_date(date_string):
         return None
 
 
+# Phrases a provider uses to say "this model exists but we have not scheduled a
+# retirement". That is a definite answer, not a gap in our data, so it gets its
+# own label instead of being lumped in with genuine parse failures.
+_NO_EOL_PHRASES = (
+    'no shutdown date',
+    'no retirement',
+    'not scheduled',
+    'no eol',
+    'tbd',
+)
+
+
 def calculate_risk_info(shutdown_date_str):
     """
     Calculate days remaining and risk level based on shutdown date.
+
+    Risk levels for the non-date cases:
+      'No EOL announced' — the provider lists the model but gives no date, or
+                           explicitly says none is scheduled. Nothing to do yet.
+      'Unknown'          — there IS a date string but we could not read it.
+                           That is a parsing gap worth looking at.
 
     Returns:
         tuple: (parsed_date_str, days_remaining, risk_level, color_dict)
     """
     melbourne_tz = pytz.timezone('Australia/Melbourne')
     current_date = datetime.now(melbourne_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    raw = (shutdown_date_str or '').strip()
+    lowered = raw.lower()
+
+    # Provider explicitly gives no date
+    if not raw or any(p in lowered for p in _NO_EOL_PHRASES):
+        return (raw or 'None announced', 'N/A', 'No EOL announced',
+                {'red': 0.85, 'green': 0.92, 'blue': 0.98})  # pale blue
 
     parsed_date = parse_shutdown_date(shutdown_date_str)
 

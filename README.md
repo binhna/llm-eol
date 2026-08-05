@@ -66,13 +66,15 @@ bellmere is the one exception: it is read from your **local checkout** so you ca
 
 Set `REFRESH_MIRRORS = False` in `src/scanner.py` to work fully offline from whatever the mirrors already hold.
 
-Each model lands in one of three buckets:
+Each model lands in one of three buckets. They answer **"where is this model referenced?"** — so the first two are both real usage, the label just says *which kind*:
 
 | Usage | Meaning |
 |---|---|
-| **Used** | The name appears in production code or prompt config |
-| **Test/Experiment** | It only appears in tests, experiments, dev or reporting code |
-| **Config only** | It is declared in the config but referenced nowhere else |
+| **Production** | Referenced from production code or prompt config — it can serve real traffic |
+| **Test only** | Referenced, but only from tests, experiments, dev scripts or reporting |
+| **Config only** | Declared in the config, referenced nowhere else in the repo |
+
+The scanner also records the **provider** each config declares (`azure`, `google`, `anthropic`, `mistral`, `bedrock`). That matters for two reasons: it tells you where a model is hosted even when no provider page mentions it, and it decides which date wins when the same model appears on several platforms — `claude-3-5-haiku` retires February 2026 on Anthropic's own API but July 2026 on Vertex AI, and only the platform you actually call is relevant.
 
 > **"Config only" does not mean safe to ignore.** These projects pick models by *name* at runtime, so any declared model goes live by editing one prompt file — no code change, no deploy. That is exactly why we still track its end-of-life date.
 
@@ -91,8 +93,11 @@ Models used by something outside these four repos can be added to `EXTRA_MODELS`
 | HIGH | ≤ 90 days remaining | Soft amber |
 | MEDIUM | ≤ 180 days remaining | Pale yellow |
 | LOW | > 180 days remaining | Soft mint |
-| Unknown | Date could not be parsed | White |
-| Not found | Model not in any provider page | Light grey |
+| No EOL announced | The provider lists the model but has scheduled no retirement. Nothing to do yet. | Pale blue |
+| Unknown | There **is** a date on the page but we couldn't read it — a parsing gap worth investigating | White |
+| Not found | Model not on any provider page at all | Light grey |
+
+`No EOL announced` and `Unknown` used to be lumped together as "Unknown", which made a definite answer ("AWS says this model has no EOL date") look like missing data.
 
 ## Google Sheets Output
 
@@ -128,7 +133,8 @@ Every model found by the repo scan. Unmatched models appear at the bottom in gre
 | Days Remaining | |
 | Risk Level | Colour-coded cell |
 | Projects | Which of our products declare it, comma-separated |
-| Usage | `Used` / `Test/Experiment` / `Config only` — filter on this |
+| Provider (config) | The provider our own config declares — filled in even when the model isn't on any provider page |
+| Usage | `Production` / `Test only` / `Config only` — filter on this |
 
 ### Model Usage (tab 3)
 

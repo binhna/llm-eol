@@ -93,24 +93,25 @@ def _write_sheet(spreadsheet, sheet, headers, rows, row_colors, last_col_index, 
 
 # Usage-status colours for the 'Model Usage' tab and the Usage column
 _USAGE_COLORS = {
-    'Used':            {'red': 0.76, 'green': 0.93, 'blue': 0.76},  # soft mint
-    'Test/Experiment': {'red': 1.0,  'green': 0.97, 'blue': 0.78},  # pale yellow
-    'Config only':     {'red': 0.88, 'green': 0.88, 'blue': 0.88},  # light grey
+    'Production':  {'red': 0.76, 'green': 0.93, 'blue': 0.76},  # soft mint
+    'Test only':   {'red': 1.0,  'green': 0.97, 'blue': 0.78},  # pale yellow
+    'Config only': {'red': 0.88, 'green': 0.88, 'blue': 0.88},  # light grey
 }
 _NEUTRAL_COLOR = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
 
 
 def _usage_lookup(scan):
     """
-    Build {model: (projects_string, usage_status)} from a scanner result.
-    Returns an empty dict when no scan was supplied.
+    Build {model: (projects, providers, usage_status)} from a scanner result,
+    each as a display-ready string. Returns {} when no scan was supplied.
     """
     if not scan or not scan.get('models'):
         return {}
     out = {}
     for model, entry in scan['models'].items():
         projects = ', '.join(sorted(entry.get('declared_in', [])))
-        out[model] = (projects, entry.get('status', ''))
+        providers = ', '.join(sorted(entry.get('providers', [])))
+        out[model] = (projects, providers, entry.get('status', ''))
     return out
 
 
@@ -191,14 +192,15 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         usage = _usage_lookup(scan)
         interested_sheet = _get_or_create_worksheet(spreadsheet, 'Interested Models', index=1)
         interested_headers = [
-            'Last Updated', 'Our Model', 'Scraped Model', 'Provider',
+            'Last Updated', 'Our Model', 'Scraped Model', 'Provider (scraped)',
             'Scraped Shutdown Date', 'Parsed Shutdown Date',
-            'Days Remaining', 'Risk Level', 'Projects', 'Usage',
+            'Days Remaining', 'Risk Level',
+            'Projects', 'Provider (config)', 'Usage',
         ]
         interested_rows, interested_colors = [], []
         for row in deprecation_matches:
             parsed_date, days_remaining, risk_level, color = calculate_risk_info(row['Shutdown Date'])
-            projects, usage_status = usage.get(row['Our Model'], ('', ''))
+            projects, providers, usage_status = usage.get(row['Our Model'], ('', '', ''))
             interested_rows.append([
                 last_updated,
                 row['Our Model'],
@@ -209,21 +211,23 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 str(days_remaining),
                 risk_level,
                 projects,
+                providers,
                 usage_status,
             ])
             interested_colors.append(color)
-        # Append unmatched models as grey rows so they're visible but clearly unfound
+        # Append unmatched models as grey rows so they're visible but clearly
+        # unfound. 'Provider (config)' still tells us where they're hosted.
         _NOT_FOUND_COLOR = {'red': 0.88, 'green': 0.88, 'blue': 0.88}
         for model in unmatched_models:
-            projects, usage_status = usage.get(model, ('', ''))
+            projects, providers, usage_status = usage.get(model, ('', '', ''))
             interested_rows.append([
                 last_updated, model, '', '', 'Not found', 'N/A', 'N/A', 'Not found',
-                projects, usage_status,
+                projects, providers, usage_status,
             ])
             interested_colors.append(_NOT_FOUND_COLOR)
 
         _write_sheet(spreadsheet, interested_sheet, interested_headers, interested_rows, interested_colors,
-                     last_col_index=9, risk_col_index=7)
+                     last_col_index=10, risk_col_index=7)
         print(f"  'Interested Models' sheet updated: {len(deprecation_matches)} matched, {len(unmatched_models)} not found")
 
         # ── Sheet 3: Model Usage ─────────────────────────────────────────────
@@ -234,8 +238,8 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             usage_sheet = _get_or_create_worksheet(spreadsheet, 'Model Usage', index=next_index)
             next_index += 1
             usage_headers = [
-                'Model', 'Project', 'Declared In Config', 'Referenced In Code',
-                'Usage', 'Evidence (file:line)',
+                'Model', 'Project', 'Provider (config)', 'Declared In Config',
+                'Referenced In Code', 'Usage', 'Evidence (file:line)',
             ]
             usage_rows, usage_colors = [], []
             for r in sorted(scan['rows'], key=lambda x: (x['model'], x['project'])):
@@ -243,15 +247,16 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 usage_rows.append([
                     r.get('model', ''),
                     r.get('project', ''),
+                    r.get('provider', ''),
                     'Yes',  # every row here came from a project's model config
                     'No' if status == 'Config only' else 'Yes',
                     status,
                     r.get('evidence', ''),
                 ])
                 usage_colors.append(_USAGE_COLORS.get(status, _NEUTRAL_COLOR))
-            # Colour the Usage column (index 4)
+            # Colour the Usage column (index 5)
             _write_sheet(spreadsheet, usage_sheet, usage_headers, usage_rows, usage_colors,
-                         last_col_index=5, risk_col_index=4)
+                         last_col_index=6, risk_col_index=5)
             skipped = scan.get('skipped') or []
             note = f", {len(skipped)} project(s) skipped" if skipped else ''
             print(f"  'Model Usage' sheet updated: {len(usage_rows)} model/project rows{note}")

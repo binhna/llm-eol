@@ -43,8 +43,14 @@ if __name__ == "__main__":
     save_db(db)
     all_records = get_all_records(db)
 
-    # 5. Match the models we found against the scraped end-of-life data
-    matches, unmatched = check_my_models(my_models, all_records)
+    # 5. Match the models we found against the scraped end-of-life data.
+    #    The provider each project declares decides which platform's date wins
+    #    when a model appears on more than one (e.g. Claude on Vertex vs direct).
+    model_providers = {
+        model: (entry.get('providers') or [''])[0]
+        for model, entry in scan['models'].items()
+    }
+    matches, unmatched = check_my_models(my_models, all_records, model_providers)
 
     # 6. Export to Google Sheets (All Models always reflects full DB)
     export_to_google_sheets(all_records, matches, unmatched, SPREADSHEET_ID, scan)

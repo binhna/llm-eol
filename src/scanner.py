@@ -6,11 +6,13 @@ model config file (`llm_config.json` or `models.yaml`). So the config is the
 authoritative list. We then search the rest of that repo for each model string
 to see whether anything actually references it.
 
-Each model ends up in one of three buckets:
+Each model ends up in one of three buckets. They answer "where is this model
+referenced?", so every bucket except the last IS a form of use — the labels say
+*which kind*:
 
-  Used            the model name appears in production code or prompt config
-  Test/Experiment it only appears in tests, experiments, dev or reporting code
-  Config only     it is declared in the config but referenced nowhere else
+  Production   referenced from production code or prompt config — real traffic
+  Test only    referenced, but only from tests, experiments, dev or reporting
+  Config only  declared in the config, referenced nowhere else in the repo
 
 "Config only" does NOT mean dead. These projects resolve models by *name* at
 runtime (millmerran's `ModelConfig.get_model(name)`), so any declared model
@@ -139,8 +141,8 @@ GLOBAL_EXCLUDES = (
     'pnpm-lock.yaml', 'uv.lock',
 )
 
-STATUS_USED = 'Used'
-STATUS_TEST = 'Test/Experiment'
+STATUS_USED = 'Production'
+STATUS_TEST = 'Test only'
 STATUS_CONFIG_ONLY = 'Config only'
 
 # Best-to-worst, for picking a model's overall status across several projects
@@ -253,18 +255,26 @@ def _read_config(project: dict, repo: Path, ref: str) -> str | None:
     return out if code == 0 and out.strip() else None
 
 
-def _model_names(raw: str, fmt: str) -> list[str]:
-    """Pull the declared model names out of a config file's text."""
+def _declared_models(raw: str, fmt: str) -> list[tuple[str, str]]:
+    """
+    Pull the declared models out of a config file's text.
+
+    Returns a list of (model_name, provider) pairs. The provider is whatever the
+    project itself declares — 'azure', 'google', 'anthropic', 'mistral',
+    'bedrock' — which is useful because it tells us where a model is *hosted*
+    even when no provider page mentions it. An empty string means the config
+    didn't say.
+    """
+    section = None
+
     if fmt == 'json_keys':
         try:
             data = json.loads(raw)
         except (ValueError, TypeError):
             return []
-        if not isinstance(data, dict):
-            return []
-        return [k for k, v in data.items() if isinstance(v, dict)]
+        section = data if isinstance(data, dict) else None
 
-    if fmt == 'yaml_nested':
+    elif fmt == 'yaml_nested':
         try:
             import yaml
         except ImportError:
@@ -274,13 +284,21 @@ def _model_names(raw: str, fmt: str) -> list[str]:
             data = yaml.safe_load(raw)
         except Exception:
             return []
-        if not isinstance(data, dict):
-            return []
-        # Model names live under a top-level `models:` key; tolerate a flat file
-        section = data.get('models', data)
-        return list(section.keys()) if isinstance(section, dict) else []
+        if isinstance(data, dict):
+            # Model names live under a top-level `models:` key; tolerate a flat file
+            inner = data.get('models', data)
+            section = inner if isinstance(inner, dict) else None
 
-    return []
+    if not section:
+        return []
+
+    out = []
+    for key, value in section.items():
+        if not isinstance(value, dict):
+            continue
+        provider = value.get('provider') or ''
+        out.append((key, str(provider).strip().lower()))
+    return out
 
 
 def _whole_name_re(model: str) -> re.Pattern:
@@ -394,7 +412,7 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
             print(f"  [{name}] skipped — cannot read {project['config']} in {where}")
             continue
 
-        declared = _model_names(raw, project['format'])
+        declared = _declared_models(raw, project['format'])
         if not declared:
             skipped.append((name, 'no models found in config'))
             print(f"  [{name}] skipped — no models found in {project['config']}")
@@ -403,7 +421,7 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
         aliases = project.get('aliases', {})
         print(f"  [{name}] {len(declared)} models declared in {project['config']} — {where}")
 
-        for raw_name in declared:
+        for raw_name, provider in declared:
             model = aliases.get(raw_name, raw_name)
             # search for the config key, and for the resolved name if different
             hits = _search(raw_name, project, repo, ref)
@@ -412,16 +430,21 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
             status, evidence = _classify(hits)
 
             entry = models.setdefault(model, {
-                'declared_in': [], 'used_in': [], 'per_project': {},
+                'declared_in': [], 'used_in': [], 'providers': [], 'per_project': {},
             })
             entry['declared_in'].append(name)
             if status == STATUS_USED:
                 entry['used_in'].append(name)
-            entry['per_project'][name] = {'status': status, 'evidence': evidence}
+            if provider and provider not in entry['providers']:
+                entry['providers'].append(provider)
+            entry['per_project'][name] = {
+                'status': status, 'evidence': evidence, 'provider': provider,
+            }
 
             rows.append({
                 'model': model,
                 'project': name,
+                'provider': provider,
                 'status': status,
                 'evidence': evidence,
             })
