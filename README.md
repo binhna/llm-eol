@@ -103,9 +103,9 @@ The scanner records the provider declared by each project. When the same model a
 
 Mirrored projects are stored as private, read-only bare mirrors under `.cache/repos/`. The scanner does not change your other clones, branches, files, or Git history. Projects you do not have locally are skipped or read from their mirror.
 
-Every project is read from `main`, deliberately. An earlier version read bellmere from whichever branch you had checked out, to catch models added on in-flight branches. That proved a poor trade: two people running the same command got different sheets, bellmere's branch changes every few days, and uncommitted local edits leaked into the shared report. Reading `main` everywhere gives one repeatable answer.
+By default, every project is read from a private mirror of `main`. This gives everyone the same, repeatable results and keeps local branches and uncommitted changes out of the shared report.
 
-To read a project from a local checkout instead, set `'source': 'worktree'` with a `'path'` in `PROJECTS`. It stays read-only and falls back to the mirror when the checkout is missing.
+To read a local checkout instead, set `'source': 'worktree'` and its `'path'` in `PROJECTS`. The scanner remains read-only and uses the mirror if the checkout is missing.
 
 To skip network refreshes and use existing mirrors, set this in `src/scanner.py`:
 
