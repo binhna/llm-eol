@@ -72,11 +72,14 @@ PROJECTS = [
         'name': 'bellmere',
         'remote': 'git@github.com:Studiosity/bellmere.git',
         'branch': 'main',
-        # bellmere moves fast on integration branches, so read the local
-        # checkout to see what is actually in flight. Change to 'mirror' to
-        # track main instead.
-        'source': 'worktree',
-        'path': '../bellmere',
+        # Read main, like every other project. This used to read the local
+        # checkout to catch models added on in-flight integration branches, but
+        # that made the report depend on whichever branch each person happened
+        # to have checked out — two people would produce different sheets from
+        # the same command. Everyone reading main means one shared, repeatable
+        # answer. Set 'source': 'worktree' with a 'path' to go back to reading a
+        # local checkout.
+        'source': 'mirror',
         'config': 'src/config/models.yaml',
         'format': 'yaml_nested',
         # projects.yaml wires each model to an environment + TPM limit, and the

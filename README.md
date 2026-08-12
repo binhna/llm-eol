@@ -1,331 +1,138 @@
 # llm-eol
 
-Scrapes LLM model deprecation and retirement dates from provider documentation, matches them against your list of active models, maintains a persistent local database, and exports results to Google Sheets with risk-based colour coding.
+Tracks LLM model deprecation and retirement dates, matches them to models used by our products, and updates the shared Google Sheet with risk levels.
 
-## Before You Start (please read)
+## Start here
 
-To run this on your own computer you need one file: **`credentials.json`**. This is the key that lets the script sign in to Google and write to our shared sheet. For security, everyone uses **their own** key — it is never passed around between people, and it is never committed to this project (git ignores it).
+### Requirements
 
-Two one-time steps:
+- Python 3.8 or later
+- Git
+- Access to the shared Google Sheet
+- **A Google service-account key saved as `credentials.json`**
 
-1. **Create your own `credentials.json`.** Follow [Setup](#setup) steps 3–4 below: in a Google Cloud project turn on the Google Sheets and Drive APIs, create a service account, and download its JSON key. Save that file in the main folder of this project (the same folder as this README) and name it exactly `credentials.json`. The script finds it automatically.
+### First-time setup
 
-2. **Get your key access to the shared sheet.** Open your `credentials.json` and copy the `client_email` value — it looks like `something@your-project.iam.gserviceaccount.com`. Send that address to Ben (bnguyen@studiosity.com), and he'll share the team sheet with it so your key is allowed to write. (You only do this once.)
+1. Install the dependencies from the project root:
 
-**We all write to the same Google Sheet — on purpose.** The sheet is already set in the code, so everyone's results go to one shared place. Please **do not change the sheet ID** in `src/main.py` and **do not create your own sheet** — if we each used a different one we'd end up with scattered, out-of-date data instead of one view everyone can trust. Once your key has access, run the script whenever you like to keep the shared sheet current (see [Usage](#usage)).
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Supported Providers
+2. In [Google Cloud Console](https://console.cloud.google.com/), enable the **Google Sheets API** and **Google Drive API**.
 
-| Provider | Source page |
-|---|---|
-| Google Gemini | ai.google.dev/gemini-api/docs/deprecations |
-| OpenAI | developers.openai.com/api/docs/deprecations |
-| Azure OpenAI | learn.microsoft.com — model retirements |
-| Anthropic | platform.claude.com/docs/about-claude/model-deprecations |
-| Vertex AI | docs.cloud.google.com — partner models deprecations |
-| AWS Bedrock | docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html |
+3. Create a service account and download a JSON key. Save it in this project's root folder as `credentials.json`.
 
-AWS Bedrock model card pages (context window, modalities, geo inference IDs, etc.) are also scraped from the provider-specific card hierarchy under `model-cards.html`.
+   You can use another path by setting `GOOGLE_CREDENTIALS_FILE`.
 
-## How It Works
+4. Open `credentials.json` and send its `client_email` to Ben (bnguyen@studiosity.com). The service account must be given Editor access to the shared sheet. This is a one-time step.
 
-1. **Scans our product repos** to work out which models to track (see below)
-2. Scrapes each provider's deprecation/lifecycle page
-3. Scrapes AWS Bedrock individual model card pages for rich metadata
-4. Merges results into `data/models_db.json` — records are **never deleted** by a scrape run (models that disappear from a provider page keep their last-known data)
-5. Prunes records whose shutdown date expired more than 1 year ago
-6. Matches the full DB against the models found in step 1
-7. Exports four Google Sheets tabs with colour-coded risk levels
+> Never commit `credentials.json`. It is ignored by Git and must remain private.
 
-## Which Models Get Tracked
+### Run
 
-The model list is **worked out automatically** — there is no hand-maintained list to keep in sync.
-
-Every model our products can call has to be declared in that project's model config file, so that file is the source of truth. For each project the scanner reads that config, then searches the rest of that repo for each model name to see whether anything actually references it.
-
-| Project | Model config | Read from |
-|---|---|---|
-| bellmere | `src/config/models.yaml` | your local checkout, whatever branch it's on |
-| burley | `src/llm_config.json` | our own mirror of `main` |
-| norval | `llm_config.json` | our own mirror of `main` |
-| bordertown | `dev/llm_config.json` | our own mirror of `main` |
-
-### It never disturbs anyone's work
-
-You do **not** need to pull the other repos, and this tool will never do it for you.
-
-For the mirrored projects it keeps a private **bare mirror** of each repo under `.cache/repos/` inside this project. A bare mirror is a read-only copy of the repo's history with no working files at all, which means scanning:
-
-- never touches your own clone of that repo — not the files, not the branch, not uncommitted work, not even its `.git` folder
-- always sees the latest `main` from the server
-- works even if you have never cloned that repo
-
-Nothing in this project ever runs `git pull`, `git checkout`, `git merge` or `git reset` on anything. The mirrors are shallow (a few MB each), are ignored by git, and are rebuilt automatically if you delete `.cache/`.
-
-bellmere is the one exception: it is read from your **local checkout** so you can see what's on your current branch rather than `main`. That is still read-only — the tool only reads files and runs `git grep`. If you don't have bellmere cloned, it quietly falls back to the mirror of `main`.
-
-Set `REFRESH_MIRRORS = False` in `src/scanner.py` to work fully offline from whatever the mirrors already hold.
-
-Each model lands in one of three buckets. They answer **"where is this model referenced?"** — so the first two are both real usage, the label just says *which kind*:
-
-| Usage | Meaning |
-|---|---|
-| **Production** | Referenced from production code or prompt config — it can serve real traffic |
-| **Test only** | Referenced, but only from tests, experiments, dev scripts or reporting |
-| **Config only** | Declared in the config, referenced nowhere else in the repo |
-
-#### How Production vs Test only is decided — and how it can be wrong
-
-This is a **convention-based guess**, not something the repos declare. It works by looking at the folder a reference sits in: directory names like `tests`, `experiments`, `dev`, `uat`, `reporting`, `simulation`, `notebooks`, `benchmarks`, `sandbox` and `training` count as non-production, and **anything else counts as production**.
-
-Names are matched as whole path segments, so `dev` catches `dev/compare.py` but not `devices/driver.py`. Certain file types are never production wherever they sit — `.md`, `.ipynb`, `.csv`, `.jsonl`, and `test_*` / `*_test` / `conftest` files.
-
-**The default direction is deliberate.** If a folder isn't recognised, its references read as *production*. For end-of-life tracking, wrongly calling something production is harmless noise, while wrongly calling a live model "test only" could get a real dependency ignored. So when adding to the list, only include names that are unambiguous.
-
-**What happens when a repo adds something new:**
-
-- A new **production** folder (e.g. `src/newservice/`) is classified correctly with no change needed.
-- A new **non-production** folder we don't know about (e.g. `spikes/`, `bench2/`) will read as production. To make that visible rather than silent, every run prints which top-level folders it counted as production:
-  ```
-  Counted as production — bellmere: src; bordertown: src; burley: src; norval: src
-  ```
-  If an unexpected name appears there, add it to `NON_PRODUCTION_DIRS` in `src/scanner.py`, or to that project's `extra_non_production` list in `PROJECTS`.
-
-**The backstop is the Evidence column.** Every classification shows the exact `file:line` it was based on, so you can always check the verdict yourself instead of trusting the heuristic.
-
-The scanner also records the **provider** each config declares (`azure`, `google`, `anthropic`, `mistral`, `bedrock`). That matters for two reasons: it tells you where a model is hosted even when no provider page mentions it, and it decides which date wins when the same model appears on several platforms — `claude-3-5-haiku` retires February 2026 on Anthropic's own API but July 2026 on Vertex AI, and only the platform you actually call is relevant.
-
-> **"Config only" does not mean safe to ignore.** These projects pick models by *name* at runtime, so any declared model goes live by editing one prompt file — no code change, no deploy. That is exactly why we still track its end-of-life date.
-
-To add a repo, change a config path, or point at a different branch, edit `PROJECTS` at the top of `src/scanner.py`. Projects you don't have cloned are skipped with a note rather than failing the run.
-
-Searching uses `git grep`, so it only looks at files git tracks — virtualenvs and build output can't pollute the results, and no extra tools are needed. Config files themselves are excluded from the search (otherwise every model would look "used" just for being listed), and matches must be the **whole** model name, so `gemini-2.5-flash` is not reported as used on a line that says `gemini-2.5-flash-lite`.
-
-Models used by something outside these four repos can be added to `EXTRA_MODELS` in `src/main.py`.
-
-## Risk Levels
-
-| Level | Condition | Colour |
-|---|---|---|
-| EXPIRED | Already past shutdown date | Muted rose |
-| CRITICAL | ≤ 30 days remaining | Soft peach-orange |
-| HIGH | ≤ 90 days remaining | Soft amber |
-| MEDIUM | ≤ 180 days remaining | Pale yellow |
-| LOW | > 180 days remaining | Soft mint |
-| No EOL announced | The provider lists the model but has scheduled no retirement. Nothing to do yet. | Pale blue |
-| Unknown | There **is** a date on the page but we couldn't read it — a parsing gap worth investigating | White |
-| Not found | Model not on any provider page at all | Light grey |
-
-`No EOL announced` and `Unknown` used to be lumped together as "Unknown", which made a definite answer ("AWS says this model has no EOL date") look like missing data.
-
-## Google Sheets Output
-
-### All Models (tab 1)
-
-Every record in the local DB, across all providers.
-
-| Column | Notes |
-|---|---|
-| Provider | |
-| Model | Model ID or human-readable name |
-| Lifecycle Stage | `Active` / `Legacy` / `EOL` — AWS Bedrock only |
-| Scraped Shutdown Date | Raw string from the provider page |
-| Parsed Shutdown Date | Normalised to `YYYY-MM-DD`; `N/A` if unparseable |
-| Days Remaining | Integer; negative = already expired |
-| Risk Level | See table above; colour-coded cell |
-| Source URL | Direct link to the provider page |
-| First Seen | Date the record was first added to the local DB |
-| Last Seen | Date the record was last confirmed by a scrape run |
-
-### Interested Models (tab 2)
-
-Every model found by the repo scan. Unmatched models appear at the bottom in grey with "Not found" values so nothing is silently omitted.
-
-| Column | Notes |
-|---|---|
-| Last Updated | Timestamp of the run (Australia/Melbourne timezone) |
-| Our Model | The model identifier as declared in the project config |
-| Scraped Model | Matched identifier from the provider page |
-| Provider | |
-| Scraped Shutdown Date | |
-| Parsed Shutdown Date | |
-| Days Remaining | |
-| Risk Level | Colour-coded cell |
-| Projects | Which of our products declare it, comma-separated |
-| Provider (config) | The provider our own config declares — filled in even when the model isn't on any provider page |
-| Usage | `Production` / `Test only` / `Config only` — filter on this |
-| Data Warning | **Blank means the date is good** — the provider's page still listed this model on today's run. Text appears only when something is wrong, and those rows are highlighted **pink** (here and on `Last Updated`). See below. |
-| Source URL | The exact provider page the date came from, so any figure can be traced back |
-
-**What the Data Warning column can say:**
-
-| Text | What it means | What to do |
-|---|---|---|
-| *(blank)* | The provider's page listed this model on today's run. The date is current. | Nothing |
-| `COULD NOT READ <provider> PAGE — date below is old, do not trust it` | That provider's whole scrape returned nothing, almost always because they changed their page layout. | Fix the parser. Meanwhile check the Source URL by hand. |
-| `Provider page no longer lists this model — date unchanged since <date>` | The scrape worked, but this particular model has dropped off the provider's page. Its date is frozen at what we last saw. | Check whether the model was retired or renamed |
-| `Not listed on any provider page — no date available` | We never found this model anywhere, so there is no date to show. | Check the provider's docs manually |
-
-### When a provider changes their page
-
-This is the failure mode that matters most. If a provider quietly rewrites their documentation, a scraper stops finding anything — and because the local database keeps its last-known values, **everything still looks fine while silently going out of date**. That is exactly what happened once: Anthropic changed a column heading from `API Model Name` to `API model name`, the parser matched on the exact string, and 14 models sat unnoticed with four-month-old dates.
-
-Three things now guard against it:
-
-1. **A scrape that returns nothing is treated as a failure, not as "no news."** Each run counts the records per provider, and any provider returning zero triggers a loud warning in the console naming that provider.
-2. **Affected rows are highlighted pink in the sheet** — both the `Last Updated` cell and `Data Warning`, which spells out what went wrong. A stale row cannot be mistaken for a current one.
-3. **Column headings are matched loosely** (case- and whitespace-insensitive, via `pick_column` in `src/utils.py`), so a cosmetic edit to a provider's table no longer breaks the scrape.
-
-If you see pink, don't act on that row's date until the parser is fixed — open its Source URL and check the provider directly.
-
-### How to tell whether a date is trustworthy
-
-Every date is scraped from the vendor's own documentation for the platform the model is hosted on — Microsoft Learn for `azure`, AWS docs for `bedrock`, and so on. Two columns let you check any figure yourself:
-
-- **Source URL** — the page it came from. Open it and confirm.
-- **Data Warning** — blank if that page still listed the model on the most recent run; otherwise it says what is wrong.
-
-Records are never deleted from the local database, which is deliberate (a model vanishing from a provider page shouldn't silently lose its history) but does mean an old value can sit there looking current. `Data Warning` is what distinguishes the two.
-
-One limit worth knowing: providers publish **one date per model version**, not one per deployment type. If you need the exact date for a specific Azure SKU (Global Standard vs Data Zone Standard vs Provisioned), Microsoft exposes a per-SKU `deprecationDate` through the [Models API](https://learn.microsoft.com/en-us/rest/api/aiservices/accountmanagement/models), which this tool does not read.
-
-### Model Usage (tab 3)
-
-One row per model per project, so you can see exactly where each model comes from and what evidence there is for it being used.
-
-| Column | Notes |
-|---|---|
-| Model | |
-| Project | |
-| Declared In Config | Always `Yes` — every row here came from a project's model config |
-| Referenced In Code | `No` when the model is config-only |
-| Usage | Colour-coded: mint = Used, yellow = Test/Experiment, grey = Config only |
-| Evidence (file:line) | Where the reference was found, for the strongest hit |
-
-### Bedrock Details (tab 4)
-
-AWS Bedrock models that have model card metadata. Only shown when card data is available.
-
-| Column | Notes |
-|---|---|
-| Model ID | |
-| Lifecycle Stage | |
-| Context Window | Tokens (integer) |
-| Max Output Tokens | Tokens (integer) |
-| Input Modalities | Comma-separated list |
-| Output Modalities | Comma-separated list |
-| Knowledge Cutoff | |
-| Geo Inference IDs | Comma-separated cross-region inference profile IDs |
-| Model Card URL | Direct link to the AWS Bedrock model card page |
-
-## Configuration
-
-The model list is discovered automatically, so normally there is nothing to configure.
-
-To change which repos are scanned, edit `PROJECTS` in `src/scanner.py`:
-
-```python
-PROJECTS = [
-    {
-        'name': 'burley',
-        'remote': 'git@github.com:Studiosity/burley.git',
-        'branch': 'main',
-        'source': 'mirror',        # read our own bare mirror — safest
-        'config': 'src/llm_config.json',
-        'format': 'json_keys',     # or 'yaml_nested'
-        'exclude': [...],          # other config files, not usage
-    },
-    {
-        'name': 'bellmere',
-        'source': 'worktree',      # read a local checkout as it is on disk
-        'path': '../bellmere',
-        'remote': '...',           # still used if the checkout is missing
-        'branch': 'main',
-        ...
-    },
-]
-```
-
-Set `REFRESH_MIRRORS = False` in the same file to scan fully offline.
-
-For a model used outside these repos, add it to `EXTRA_MODELS` in `src/main.py`.
-
-**Model matching rules** (applied in order):
-1. Exact match
-2. Scraped model has appended version info — `gpt-4o` matches `gpt-4o (2024-05-13)`
-3. User model has appended version tag — `claude-3-haiku@20240307` matches `claude-3-haiku`
-4. AWS Bedrock cross-region prefix stripped — `us.meta.llama3-...` matches `meta.llama3-...`
-   Supported prefixes: `us.` `eu.` `ap.` `apac.` `au.` `ca.` `jp.` `global.` `us-gov.`
-
-## Usage
+Run from the project root:
 
 ```bash
 python src/main.py
 ```
 
-Run from the project root. The `src/` directory is automatically on the Python path.
+The script scans product repositories, scrapes provider documentation, updates `data/models_db.json`, and exports four tabs to the shared Google Sheet. The sheet ID is already configured in `src/main.py`; do not change it or create a separate sheet.
 
-## Setup
+## What it tracks
 
-### 1. Python Version
+The model list is discovered automatically from product repositories. A model is included when it is declared in a project's model config, even if it is not referenced elsewhere.
 
-Python **3.8 or later** is required.
+| Project | Model config | Source |
+|---|---|---|
+| bellmere | `src/config/models.yaml` | Private mirror of `main` |
+| burley | `src/llm_config.json` | Private mirror of `main` |
+| norval | `llm_config.json` | Private mirror of `main` |
+| bordertown | `dev/llm_config.json` | Private mirror of `main` |
 
-### 2. Install Dependencies
+Models used outside these repositories can be added to `EXTRA_MODELS` in `src/main.py`.
 
-```bash
-pip install -r requirements.txt
+Supported provider sources are Google Gemini, OpenAI, Azure OpenAI, Anthropic, Vertex AI, and AWS Bedrock. Bedrock model cards are also scraped for context limits, modalities, knowledge cutoff, and cross-region inference IDs.
+
+## Results
+
+The Google Sheet contains four tabs:
+
+- **All Models:** every model in the local database.
+- **Interested Models:** models found in our product repositories, matched to provider data.
+- **Model Usage:** each model's project, usage classification, and evidence file.
+- **Bedrock Details:** extra metadata from AWS model cards.
+
+Risk levels are based on the shutdown date:
+
+| Level | Meaning |
+|---|---|
+| EXPIRED | Shutdown date has passed |
+| CRITICAL | 30 days or less remain |
+| HIGH | 31 to 90 days remain |
+| MEDIUM | 91 to 180 days remain |
+| LOW | More than 180 days remain |
+| No EOL announced | The provider lists the model but has no retirement date |
+| Unknown | A date exists but could not be parsed |
+| Not found | The model was not found on a provider page |
+
+### Data warnings
+
+Check the **Data Warning** column before acting on a date:
+
+- Blank means the provider listed the model during the latest run.
+- `COULD NOT READ ... PAGE` means the parser likely broke after a provider page change. The old date is not trustworthy.
+- `Provider page no longer lists this model` means the date is retained from the last successful scrape.
+- `Not listed on any provider page` means no date was found.
+
+Warning rows are highlighted pink. Open the **Source URL** to verify any date manually.
+
+## How scanning works
+
+For each project, the scanner reads the model config and searches tracked files with `git grep`:
+
+- **Production:** referenced outside known test or development paths.
+- **Test only:** referenced only in tests, experiments, development scripts, or similar paths.
+- **Config only:** declared in the config but not referenced elsewhere.
+
+This classification is based on folder and file naming conventions. It is a useful indication, not a guarantee. Always check the **Evidence** column. Unknown folders are treated as production so live models are less likely to be missed.
+
+The scanner records the provider declared by each project. When the same model appears on multiple platforms, that provider determines which date is relevant.
+
+## Repository safety and offline mode
+
+Mirrored projects are stored as private, read-only bare mirrors under `.cache/repos/`. The scanner does not change your other clones, branches, files, or Git history. Projects you do not have locally are skipped or read from their mirror.
+
+Every project is read from `main`, deliberately. An earlier version read bellmere from whichever branch you had checked out, to catch models added on in-flight branches. That proved a poor trade: two people running the same command got different sheets, bellmere's branch changes every few days, and uncommitted local edits leaked into the shared report. Reading `main` everywhere gives one repeatable answer.
+
+To read a project from a local checkout instead, set `'source': 'worktree'` with a `'path'` in `PROJECTS`. It stays read-only and falls back to the mirror when the checkout is missing.
+
+To skip network refreshes and use existing mirrors, set this in `src/scanner.py`:
+
+```python
+REFRESH_MIRRORS = False
 ```
 
-### 3. Enable Google Sheets API
+To add or change a scanned repository, edit `PROJECTS` in `src/scanner.py`. A project can use `source: 'mirror'` or `source: 'worktree'`.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create or select a project
-3. Enable the **Google Sheets API** and **Google Drive API**
+## Local database
 
-### 4. Create a Service Account
+`data/models_db.json` is the operational source of truth. It contains public scraped data and is safe to commit.
 
-1. Navigate to **IAM & Admin > Service Accounts**
-2. Click **Create Service Account** (e.g. `llm-eol-tracker`)
-3. Click the account → **Keys** tab → **Add Key > Create New Key > JSON**
-4. Save the downloaded file as `credentials.json` in the project root, or set `GOOGLE_CREDENTIALS_FILE` to its path
+- Records are merged, not replaced.
+- Models missing from a provider page are retained with their last-seen date.
+- Records expired for more than one year are pruned automatically.
+- The Google Sheet is an output view of this database.
 
-> `credentials.json` is listed in `.gitignore` and must never be committed.
+## Project layout
 
-### 5. Share the Spreadsheet
-
-Copy the service account email from `credentials.json` and share your target Google Sheet with it (Editor access).
-
-## Local Database
-
-Model records are persisted to `data/models_db.json`. This file:
-
-- Is safe to commit — it contains no secrets, only scraped public data
-- Grows incrementally — records are merged in on each run, never bulk-replaced
-- Retains records that disappear from provider pages, with `last_seen` showing when they were last confirmed
-- Has expired entries (shutdown date > 1 year ago) pruned automatically on each run
-
-The Google Sheet is a **human-readable view** of the database, not a replacement for it. It is output-only; the JSON file is the operational source of truth.
-
-## Project Layout
-
-```
-src/
-  main.py                    ← entry point: SPREADSHEET_ID, EXTRA_MODELS, run order
-  scanner.py                 ← PROJECTS: scan our repos for declared + used models
-  utils.py                   ← get_html, parse_shutdown_date, calculate_risk_info
-  checker.py                 ← check_my_models, Bedrock geo-prefix matching
-  sheets.py                  ← Google Sheets export (4 tabs)
-  database.py                ← load/save/merge/cleanup for data/models_db.json
-  parsers/
-    __init__.py              ← parse_all_deprecations (calls all parsers, deduplicates)
-    google_gemini.py
-    openai.py
-    azure_openai.py
-    anthropic.py
-    vertex_ai.py
-    bedrock.py               ← lifecycle page (Active / Legacy / EOL tables)
-    bedrock_model_cards.py   ← model card pages (context window, modalities, etc.)
-data/
-  models_db.json             ← persistent model database (auto-created on first run)
+```text
+src/main.py                    Entry point and sheet configuration
+src/scanner.py                 Finds declared and referenced models
+src/checker.py                 Matches models to provider records
+src/sheets.py                  Writes the four Google Sheet tabs
+src/database.py                Loads, merges, and cleans the local database
+src/utils.py                   Fetching, date parsing, and risk calculation
+src/parsers/                   Provider and Bedrock model-card parsers
+data/models_db.json            Persistent scraped model data
 ```
