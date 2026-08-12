@@ -154,8 +154,17 @@ Every model found by the repo scan. Unmatched models appear at the bottom in gre
 | Projects | Which of our products declare it, comma-separated |
 | Provider (config) | The provider our own config declares — filled in even when the model isn't on any provider page |
 | Usage | `Production` / `Test only` / `Config only` — filter on this |
-| Source Confirmed | Whether the date is current. `This run` = the provider page still listed it. `COULD NOT FETCH <provider>` = that provider's whole scrape failed, so this is a last-known value — the parser probably needs fixing. `Stale — last seen <date>` = the model has dropped off the provider's page. The last two are highlighted **pink**, along with `Last Updated`. |
+| Data Warning | **Blank means the date is good** — the provider's page still listed this model on today's run. Text appears only when something is wrong, and those rows are highlighted **pink** (here and on `Last Updated`). See below. |
 | Source URL | The exact provider page the date came from, so any figure can be traced back |
+
+**What the Data Warning column can say:**
+
+| Text | What it means | What to do |
+|---|---|---|
+| *(blank)* | The provider's page listed this model on today's run. The date is current. | Nothing |
+| `COULD NOT READ <provider> PAGE — date below is old, do not trust it` | That provider's whole scrape returned nothing, almost always because they changed their page layout. | Fix the parser. Meanwhile check the Source URL by hand. |
+| `Provider page no longer lists this model — date unchanged since <date>` | The scrape worked, but this particular model has dropped off the provider's page. Its date is frozen at what we last saw. | Check whether the model was retired or renamed |
+| `Not listed on any provider page — no date available` | We never found this model anywhere, so there is no date to show. | Check the provider's docs manually |
 
 ### When a provider changes their page
 
@@ -164,7 +173,7 @@ This is the failure mode that matters most. If a provider quietly rewrites their
 Three things now guard against it:
 
 1. **A scrape that returns nothing is treated as a failure, not as "no news."** Each run counts the records per provider, and any provider returning zero triggers a loud warning in the console naming that provider.
-2. **Affected rows are highlighted pink in the sheet** — both the `Last Updated` cell and `Source Confirmed`, which reads `COULD NOT FETCH <provider>`. A stale row cannot be mistaken for a current one.
+2. **Affected rows are highlighted pink in the sheet** — both the `Last Updated` cell and `Data Warning`, which spells out what went wrong. A stale row cannot be mistaken for a current one.
 3. **Column headings are matched loosely** (case- and whitespace-insensitive, via `pick_column` in `src/utils.py`), so a cosmetic edit to a provider's table no longer breaks the scrape.
 
 If you see pink, don't act on that row's date until the parser is fixed — open its Source URL and check the provider directly.
@@ -174,9 +183,9 @@ If you see pink, don't act on that row's date until the parser is fixed — open
 Every date is scraped from the vendor's own documentation for the platform the model is hosted on — Microsoft Learn for `azure`, AWS docs for `bedrock`, and so on. Two columns let you check any figure yourself:
 
 - **Source URL** — the page it came from. Open it and confirm.
-- **Source Confirmed** — whether that page still listed the model on the most recent run.
+- **Data Warning** — blank if that page still listed the model on the most recent run; otherwise it says what is wrong.
 
-Records are never deleted from the local database, which is deliberate (a model vanishing from a provider page shouldn't silently lose its history) but does mean an old value can sit there looking current. `Source Confirmed` is what distinguishes the two.
+Records are never deleted from the local database, which is deliberate (a model vanishing from a provider page shouldn't silently lose its history) but does mean an old value can sit there looking current. `Data Warning` is what distinguishes the two.
 
 One limit worth knowing: providers publish **one date per model version**, not one per deployment type. If you need the exact date for a specific Azure SKU (Global Standard vs Data Zone Standard vs Provisioned), Microsoft exposes a per-SKU `deprecationDate` through the [Models API](https://learn.microsoft.com/en-us/rest/api/aiservices/accountmanagement/models), which this tool does not read.
 

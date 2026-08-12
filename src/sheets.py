@@ -208,7 +208,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             'Scraped Shutdown Date', 'Parsed Shutdown Date',
             'Days Remaining', 'Risk Level',
             'Projects', 'Provider (config)', 'Usage',
-            'Source Confirmed', 'Source URL',
+            'Data Warning', 'Source URL',
         ]
         today = datetime.now(melbourne_tz).strftime('%Y-%m-%d')
         scrape_stats = scrape_stats or {}
@@ -217,7 +217,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         failed_providers = {p for p, n in scrape_stats.items() if n == 0}
 
         # Column indexes used for cell colouring
-        _LAST_UPDATED_COL, _RISK_COL, _USAGE_COL, _CONFIRMED_COL = 0, 7, 10, 11
+        _LAST_UPDATED_COL, _RISK_COL, _USAGE_COL, _WARNING_COL = 0, 7, 10, 11
 
         interested_rows, interested_colors = [], []
         stale_count = 0
@@ -225,20 +225,22 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             parsed_date, days_remaining, risk_level, color = calculate_risk_info(row['Shutdown Date'])
             projects, providers, usage_status = usage.get(row['Our Model'], ('', '', ''))
 
-            # Work out whether this figure is current, and if not, why not.
+            # Only say something when there IS something wrong. A warning column
+            # that fires on every row is noise nobody reads, so the normal case
+            # — the provider page still listed this model today — stays blank.
             seen = row.get('Last Seen', '')
             provider = row.get('Provider', '')
             if provider in failed_providers:
-                confirmed = f'COULD NOT FETCH {provider}'
+                warning = f'COULD NOT READ {provider} PAGE — date below is old, do not trust it'
                 is_stale = True
             elif seen == today:
-                confirmed = 'This run'
+                warning = ''
                 is_stale = False
             elif seen:
-                confirmed = f'Stale — last seen {seen}'
+                warning = f'Provider page no longer lists this model — date unchanged since {seen}'
                 is_stale = True
             else:
-                confirmed = 'Unknown'
+                warning = 'Never confirmed against a provider page'
                 is_stale = True
             if is_stale:
                 stale_count += 1
@@ -255,7 +257,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 projects,
                 providers,
                 usage_status,
-                confirmed,
+                warning,
                 row.get('Source URL', ''),
             ])
             colors = {
@@ -266,7 +268,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
                 # Pink on both the timestamp and the reason, so a stale row is
                 # obvious at a glance no matter which column you're reading.
                 colors[_LAST_UPDATED_COL] = _STALE_COLOR
-                colors[_CONFIRMED_COL] = _STALE_COLOR
+                colors[_WARNING_COL] = _STALE_COLOR
             interested_colors.append(colors)
 
         # Append unmatched models as grey rows so they're visible but clearly
@@ -276,7 +278,8 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             projects, providers, usage_status = usage.get(model, ('', '', ''))
             interested_rows.append([
                 last_updated, model, '', '', 'Not found', 'N/A', 'N/A', 'Not found',
-                projects, providers, usage_status, 'Not on any provider page', '',
+                projects, providers, usage_status,
+                'Not listed on any provider page — no date available', '',
             ])
             interested_colors.append({
                 _RISK_COL: _NOT_FOUND_COLOR,
