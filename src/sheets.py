@@ -1,16 +1,50 @@
 import os
+import time
 import pytz
 from datetime import datetime
 from utils import calculate_risk_info
+
+# Google Sheets occasionally returns a short-lived server error — 503 when the
+# service is briefly unavailable, 429 when we have sent requests too quickly.
+# These say nothing about our data and usually clear within seconds, so we wait
+# and try again rather than throwing away a whole run's scraping.
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+_MAX_ATTEMPTS = 5
+
+
+def _api_call(operation, *args, **kwargs):
+    """
+    Run one Google Sheets call, retrying briefly if Google is having a moment.
+
+    Waits 2s, then 4, 8, 16 between attempts. Anything that is not a temporary
+    server error — a bad sheet ID, missing permissions — is raised immediately,
+    because retrying those would just be a slower failure.
+    """
+    import gspread
+
+    delay = 2
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            return operation(*args, **kwargs)
+        except gspread.exceptions.APIError as e:
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
+            if status not in _RETRYABLE_STATUS or attempt == _MAX_ATTEMPTS:
+                raise
+            print(f"  Google Sheets is busy (HTTP {status}). "
+                  f"Waiting {delay}s and trying again "
+                  f"— attempt {attempt} of {_MAX_ATTEMPTS - 1}.")
+            time.sleep(delay)
+            delay *= 2
 
 
 def _get_or_create_worksheet(spreadsheet, title, index):
     """Return a worksheet by title, creating it (at given tab index) if it doesn't exist."""
     import gspread
     try:
-        return spreadsheet.worksheet(title)
+        return _api_call(spreadsheet.worksheet, title)
     except gspread.WorksheetNotFound:
-        return spreadsheet.add_worksheet(title=title, rows=1000, cols=20, index=index)
+        return _api_call(spreadsheet.add_worksheet,
+                         title=title, rows=1000, cols=20, index=index)
 
 
 def _write_sheet(spreadsheet, sheet, headers, rows, cell_colors, last_col_index):
@@ -26,12 +60,13 @@ def _write_sheet(spreadsheet, sheet, headers, rows, cell_colors, last_col_index)
     sheet_id = sheet.id
 
     # 1. Clear existing content (1 request)
-    sheet.clear()
+    _api_call(sheet.clear)
 
     # 2. Write headers + all data rows in one call (1 request)
     all_values = [headers] + rows
     col_letter = chr(ord('A') + last_col_index)
-    sheet.update(values=all_values, range_name=f'A1:{col_letter}{len(all_values)}')
+    _api_call(sheet.update, values=all_values,
+              range_name=f'A1:{col_letter}{len(all_values)}')
 
     # 3. Build ALL formatting changes and send as a single batch_update (1 request)
     requests = []
@@ -92,7 +127,7 @@ def _write_sheet(spreadsheet, sheet, headers, rows, cell_colors, last_col_index)
             })
 
     if requests:
-        spreadsheet.batch_update({'requests': requests})
+        _api_call(spreadsheet.batch_update, {'requests': requests})
 
 
 # Usage-status colours for the 'Model Usage' tab and the Usage column
@@ -166,7 +201,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         melbourne_tz = pytz.timezone('Australia/Melbourne')
         last_updated = datetime.now(melbourne_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
 
-        spreadsheet = client.open_by_key(spreadsheet_id)
+        spreadsheet = _api_call(client.open_by_key, spreadsheet_id)
 
         # ── Sheet 1: All Models ──────────────────────────────────────────────
         # Columns A-J (indices 0-9); Risk Level = col G (index 6)
@@ -373,3 +408,6 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         print("  GOOGLE_CREDENTIALS_FILE to its path.")
     except Exception as e:
         print(f"\n  Google Sheets export failed: {e}")
+        print("  Your scraped data is safe — it was already written to")
+        print("  data/models_db.json before this step. Only the sheet is out of date.")
+        print("  If Google was unavailable, just run the script again.")
