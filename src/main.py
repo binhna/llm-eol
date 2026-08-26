@@ -1,3 +1,5 @@
+import argparse
+
 from parsers import parse_all_deprecations
 from parsers.bedrock_model_cards import scrape_bedrock_model_cards
 from checker import check_my_models
@@ -21,29 +23,55 @@ SPREADSHEET_ID = '1zkXpUiVxZcZ9rmCD-Qc6C6oFky966vNMGvK0S1cYy6c'
 EXTRA_MODELS = []
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Track LLM end-of-life dates and update the shared Google Sheet.",
+    )
+    parser.add_argument(
+        '--export-only', action='store_true',
+        help="Skip scraping the provider websites and just send whatever is "
+             "already in data/models_db.json to the sheet. Use this to retry "
+             "after a failed upload, or when you only changed how the sheet "
+             "is laid out. Takes seconds instead of minutes.",
+    )
+    args = parser.parse_args()
+
     # 1. Work out which models we need to track by scanning our product repos:
     #    read each project's model config, then search that codebase to see
     #    which of those models are actually referenced.
     scan = scan_projects()
     my_models = models_to_track(scan, EXTRA_MODELS)
 
-    # 2. Scrape all provider deprecation pages. scrape_stats tells us if any
-    #    provider returned nothing, which means a broken parser rather than a
-    #    provider with no news — those rows get flagged in the sheet.
-    scraped, scrape_stats = parse_all_deprecations()
+    scrape_stats = None
+    if args.export_only:
+        # Reuse the last scrape instead of fetching the provider pages again.
+        db = load_db()
+        if not db:
+            raise SystemExit(
+                "  Nothing to export: data/models_db.json is empty or missing.\n"
+                "  Run without --export-only first to gather the data."
+            )
+        all_records = get_all_records(db)
+        gathered = max((r.get('last_seen', '') for r in all_records), default='unknown')
+        print(f"\nExport only — reusing the scrape from {gathered} "
+              f"({len(all_records)} records). Provider websites not contacted.")
+    else:
+        # 2. Scrape all provider deprecation pages. scrape_stats tells us if any
+        #    provider returned nothing, which means a broken parser rather than a
+        #    provider with no news — those rows get flagged in the sheet.
+        scraped, scrape_stats = parse_all_deprecations()
 
-    # 3. Scrape Bedrock model card metadata (context window, modalities, etc.)
-    card_metadata = scrape_bedrock_model_cards()
+        # 3. Scrape Bedrock model card metadata (context window, modalities, etc.)
+        card_metadata = scrape_bedrock_model_cards()
 
-    # 4. Merge everything into the persistent DB and prune old entries
-    db = load_db()
-    db = merge_scraped(db, scraped)
-    db = merge_card_metadata(db, card_metadata)
-    db, removed = cleanup_expired(db, days_threshold=365)
-    if removed:
-        print(f"  Pruned {removed} record(s) expired more than 1 year ago")
-    save_db(db)
-    all_records = get_all_records(db)
+        # 4. Merge everything into the persistent DB and prune old entries
+        db = load_db()
+        db = merge_scraped(db, scraped)
+        db = merge_card_metadata(db, card_metadata)
+        db, removed = cleanup_expired(db, days_threshold=365)
+        if removed:
+            print(f"  Pruned {removed} record(s) expired more than 1 year ago")
+        save_db(db)
+        all_records = get_all_records(db)
 
     # 5. Match the models we found against the scraped end-of-life data.
     #    The provider each project declares decides which platform's date wins

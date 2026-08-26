@@ -39,6 +39,16 @@ python src/main.py
 
 The script scans product repositories, scrapes provider documentation, updates `data/models_db.json`, and exports four tabs to the shared Google Sheet. The sheet ID is already configured in `src/main.py`; do not change it or create a separate sheet.
 
+A full run takes a few minutes, mostly spent reading provider documentation.
+
+To skip that and send the data you already have straight to the sheet:
+
+```bash
+python src/main.py --export-only
+```
+
+This reuses the last scrape stored in `data/models_db.json` and finishes in seconds. Use it to retry after a failed upload — Google returning a `503`, for example — since the scraped data is saved before the upload step and is not lost. It still scans the product repositories, so the model list stays current; it just does not contact the provider websites.
+
 ## What it tracks
 
 The model list is discovered automatically from product repositories. A model is included when it is declared in a project's model config, even if it is not referenced elsewhere.

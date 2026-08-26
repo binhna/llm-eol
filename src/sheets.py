@@ -245,7 +245,14 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             'Projects', 'Provider (config)', 'Usage',
             'Data Warning', 'Source URL',
         ]
-        today = datetime.now(melbourne_tz).strftime('%Y-%m-%d')
+        # Judge staleness against the most recent scrape in the data, not against
+        # today. In a normal run those are the same day. In an export-only run
+        # nothing was re-scraped, so comparing with today would wrongly flag
+        # every single row as stale.
+        scrape_date = max(
+            (r.get('last_seen', '') for r in all_deprecations if r.get('last_seen')),
+            default=datetime.now(melbourne_tz).strftime('%Y-%m-%d'),
+        )
         scrape_stats = scrape_stats or {}
         # Providers whose scrape returned nothing this run — their models are all
         # showing last-known values.
@@ -268,7 +275,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
             if provider in failed_providers:
                 warning = f'COULD NOT READ {provider} PAGE — date below is old, do not trust it'
                 is_stale = True
-            elif seen == today:
+            elif seen == scrape_date:
                 warning = ''
                 is_stale = False
             elif seen:
