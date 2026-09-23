@@ -90,6 +90,20 @@ def parse_shutdown_date(date_string):
         except (ValueError, OverflowError):
             pass
 
+    # Step 3b: month and year only ("Sep 2026"). The fuzzy parser would fill in
+    # today's day of the month, which is arbitrary; use the 1st instead.
+    month_year = re.fullmatch(
+        r'(?:.*\s)?((?:January|February|March|April|May|June|July|August|'
+        r'September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+\d{4})',
+        cleaned, re.IGNORECASE,
+    )
+    if month_year:
+        try:
+            return date_parser.parse('1 ' + month_year.group(1))
+        except (ValueError, OverflowError):
+            pass
+
     # Step 4: fuzzy fallback on the cleaned string
     try:
         return date_parser.parse(cleaned, fuzzy=True)
@@ -107,6 +121,11 @@ _NO_EOL_PHRASES = (
     'no eol',
     'tbd',
 )
+
+
+# How providers phrase an earliest-possible date: AWS "No sooner than",
+# Anthropic "Not sooner than", Azure "No earlier than".
+_FLOOR_RE = re.compile(r'\s*(?:no|not)\s+(?:sooner|earlier)\s+than\b', re.IGNORECASE)
 
 
 def calculate_risk_info(shutdown_date_str):
@@ -145,7 +164,13 @@ def calculate_risk_info(shutdown_date_str):
     days_remaining = (parsed_date - current_date).days
     formatted_date = parsed_date.strftime('%Y-%m-%d')
 
-    if days_remaining < 0:
+    if days_remaining < 0 and _FLOOR_RE.match(raw):
+        # "No sooner than <past date>" is the earliest date a retirement could
+        # have been set, not a retirement. The model is still available and the
+        # provider has to give notice first (AWS: 6 months or 45 days).
+        risk_level = 'Can retire with notice'
+        color = {'red': 0.98, 'green': 0.86, 'blue': 0.70}  # soft apricot
+    elif days_remaining < 0:
         risk_level = 'EXPIRED'
         color = {'red': 0.93, 'green': 0.56, 'blue': 0.56}  # Muted rose
     elif days_remaining <= 30:

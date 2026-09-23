@@ -128,13 +128,15 @@ def cleanup_expired(db: dict, days_threshold: int = 365) -> tuple:
 
     Returns (updated_db, number_of_removed_records).
     """
-    from utils import parse_shutdown_date
+    from utils import parse_shutdown_date, _FLOOR_RE
     cutoff = datetime.now() - timedelta(days=days_threshold)
     to_remove = []
     for key, record in db.items():
         date_str = record.get('shutdown_date', '')
         if not date_str:
             continue
+        if _FLOOR_RE.match(date_str):
+            continue  # an earliest-possible date passing doesn't retire the model
         parsed = parse_shutdown_date(date_str)
         if parsed and parsed.replace(tzinfo=None) < cutoff:
             to_remove.append(key)

@@ -78,6 +78,7 @@ Risk levels are based on the shutdown date:
 | Level | Meaning |
 |---|---|
 | EXPIRED | Shutdown date has passed |
+| Can retire with notice | The provider's *earliest possible* retirement date ("No sooner than …") has passed. The model still works; the provider must give notice before retiring it (AWS: 6 months or 45 days). |
 | CRITICAL | 30 days or less remain |
 | HIGH | 31 to 90 days remain |
 | MEDIUM | 91 to 180 days remain |
