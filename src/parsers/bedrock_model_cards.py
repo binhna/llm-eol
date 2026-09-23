@@ -89,7 +89,9 @@ def _parse_card_html(html: str, url: str) -> dict | None:
 
     def _label(patterns: list[str]) -> str:
         for pattern in patterns:
-            m = re.search(pattern + r'[\s:：]+([^\n]+)', text, re.IGNORECASE)
+            # Anchored at line start and requiring the colon, so 'Model lifecycle'
+            # doesn't match the 'Model lifecycle policy:' line AWS added in 2026.
+            m = re.search(r'(?m)^' + pattern + r'\s*[:：]\s*([^\n]+)', text, re.IGNORECASE)
             if m:
                 return m.group(1).strip()
         return ''
@@ -135,6 +137,12 @@ def _parse_card_html(html: str, url: str) -> dict | None:
     lifecycle_stage = _label(['Model lifecycle']) or None
     eol_raw = _label(['Model EOL date', 'EOL date'])
     shutdown_date = '' if eol_raw.lower() in _NA_VALUES else eol_raw
+    if not shutdown_date:
+        # Active models have no EOL date yet, but since Sept 2026 every card
+        # gives the earliest date one could be set. Track that floor.
+        floor = _label(['EOL no sooner than'])
+        if floor and floor.lower() not in _NA_VALUES:
+            shutdown_date = f'No sooner than {floor}'
 
     context_window = _tokens_to_int(_label(['Context [Ww]indow']))
     max_output_tokens = _tokens_to_int(_label(['Max [Oo]utput [Tt]okens', 'Maximum output tokens']))

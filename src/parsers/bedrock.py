@@ -3,7 +3,10 @@ import pandas as pd
 from io import StringIO
 from utils import get_html, parse_shutdown_date
 
-SOURCE_URL = 'https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html'
+# On 7 Sept 2026 AWS moved the lifecycle tables to this -legacy page. Models
+# launched after that date only publish an "EOL no sooner than" date on their
+# model card, which bedrock_model_cards.py reads.
+SOURCE_URL = 'https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html'
 
 
 def parse_bedrock():
@@ -54,7 +57,9 @@ def parse_bedrock():
                         if re.search(r'launch date', date_part, re.IGNORECASE):
                             continue
                         eol = date_part
-                    _keep_earliest(model_id, eol, 'Active')
+                    # The legacy page has a 'Legacy date' column; its rows are Legacy models
+                    stage = 'Legacy' if 'Legacy date' in df.columns else 'Active'
+                    _keep_earliest(model_id, eol, stage)
 
             # Legacy / EOL tables (have a "Model version" column)
             # Legacy has "Public extended access date"; EOL does not.
