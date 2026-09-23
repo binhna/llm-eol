@@ -49,85 +49,50 @@ def _get_or_create_worksheet(spreadsheet, title, index):
 
 def _write_sheet(spreadsheet, sheet, headers, rows, cell_colors, last_col_index):
     """
-    Clear, write all data, and apply all formatting in a single batch_update call.
+    Replace a tab's contents — text AND colours — in one batch_update call.
 
-    cell_colors is one dict per data row, mapping a column index to a colour —
-    so a row can highlight several cells (risk level, usage, staleness) rather
-    than just one. Keeps API write requests to 3 per sheet regardless of row
-    count, avoiding the 60-writes/min quota limit.
+    Sending both in a single request matters: Google applies a batch all or
+    nothing. When text and colours went in separate calls, a failure between
+    them (a retry that gave up, a Ctrl+C) left new text under the previous run's
+    colours, e.g. a "MEDIUM" cell still painted "No EOL announced" blue.
+
+    cell_colors is one dict per data row, mapping a column index to a colour.
     """
     num_cols = last_col_index + 1
-    sheet_id = sheet.id
+    header_format = {
+        'backgroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2},
+        'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}},
+    }
 
-    # 1. Clear existing content (1 request)
-    _api_call(sheet.clear)
+    def cell(value, fmt=None):
+        c = {'userEnteredValue': {'stringValue': str(value)}} if value not in (None, '') else {}
+        if fmt:
+            c['userEnteredFormat'] = fmt
+        return c
 
-    # 2. Write headers + all data rows in one call (1 request)
-    all_values = [headers] + rows
-    col_letter = chr(ord('A') + last_col_index)
-    _api_call(sheet.update, values=all_values,
-              range_name=f'A1:{col_letter}{len(all_values)}')
+    row_data = [{'values': [cell(h, header_format) for h in headers]}]
+    for values, colors in zip(rows, cell_colors):
+        row_data.append({'values': [
+            cell(values[i] if i < len(values) else '',
+                 {'backgroundColor': colors[i]} if colors and i in colors else None)
+            for i in range(num_cols)
+        ]})
 
-    # 3. Build ALL formatting changes and send as a single batch_update (1 request)
     requests = []
-
-    # Reset all formatting across the full worksheet first (handles leftover colors
-    # from previous runs that had more rows than the current run)
-    requests.append({
-        'repeatCell': {
-            'range': {
-                'sheetId': sheet_id,
-                'startRowIndex': 0,
-                'startColumnIndex': 0,
-            },
-            'cell': {'userEnteredFormat': {}},
-            'fields': 'userEnteredFormat',
-        }
-    })
-
-    # Header: dark background, bold white text
-    requests.append({
-        'repeatCell': {
-            'range': {
-                'sheetId': sheet_id,
-                'startRowIndex': 0, 'endRowIndex': 1,
-                'startColumnIndex': 0, 'endColumnIndex': num_cols,
-            },
-            'cell': {'userEnteredFormat': {
-                'backgroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2},
-                'textFormat': {
-                    'bold': True,
-                    'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
-                },
-            }},
-            'fields': (
-                'userEnteredFormat.backgroundColor,'
-                'userEnteredFormat.textFormat.bold,'
-                'userEnteredFormat.textFormat.foregroundColor'
-            ),
-        }
-    })
-
-    # Colour individual cells: one repeatCell per (row, column) that needs it
-    for i, colors in enumerate(cell_colors):
-        if not colors:
-            continue
-        row_idx = i + 1  # 0-based; row 0 is the header
-        for col_idx, color in sorted(colors.items()):
-            requests.append({
-                'repeatCell': {
-                    'range': {
-                        'sheetId': sheet_id,
-                        'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
-                        'startColumnIndex': col_idx, 'endColumnIndex': col_idx + 1,
-                    },
-                    'cell': {'userEnteredFormat': {'backgroundColor': color}},
-                    'fields': 'userEnteredFormat.backgroundColor',
-                }
-            })
-
-    if requests:
-        _api_call(spreadsheet.batch_update, {'requests': requests})
+    # The tab is created with 1000 rows; grow it if the data needs more.
+    missing = len(row_data) - sheet.row_count
+    if missing > 0:
+        requests.append({'appendDimension': {'sheetId': sheet.id, 'dimension': 'ROWS', 'length': missing}})
+    requests += [
+        # 1. Wipe every value and colour left over from the previous run
+        {'updateCells': {'range': {'sheetId': sheet.id},
+                         'fields': 'userEnteredValue,userEnteredFormat'}},
+        # 2. Write the new text and colours together
+        {'updateCells': {'start': {'sheetId': sheet.id, 'rowIndex': 0, 'columnIndex': 0},
+                         'rows': row_data,
+                         'fields': 'userEnteredValue,userEnteredFormat'}},
+    ]
+    _api_call(spreadsheet.batch_update, {'requests': requests})
 
 
 # Usage-status colours for the 'Model Usage' tab and the Usage column
