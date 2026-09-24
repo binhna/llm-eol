@@ -132,6 +132,10 @@ To add or change a scanned repository, edit `PROJECTS` in `src/scanner.py`.
 - Records expired for more than one year are pruned automatically.
 - The Google Sheet is an output view of this database.
 
+## Moving to millmerran
+
+See [docs/MILLMERRAN_MIGRATION.md](docs/MILLMERRAN_MIGRATION.md) for the plan to run this nightly from millmerran: where the code goes, the workflow, the permissions and secrets it needs, how to test it, and lessons to keep.
+
 ## Project layout
 
 ```text
