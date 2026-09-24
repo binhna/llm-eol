@@ -1,7 +1,7 @@
 import os
 import time
-import pytz
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from utils import calculate_risk_info
 
 # Google Sheets occasionally returns a short-lived server error — 503 when the
@@ -163,7 +163,7 @@ def export_to_google_sheets(all_deprecations, deprecation_matches, unmatched_mod
         creds = Credentials.from_service_account_file(credentials_file, scopes=scope)
         client = gspread.authorize(creds)
 
-        melbourne_tz = pytz.timezone('Australia/Melbourne')
+        melbourne_tz = ZoneInfo('Australia/Melbourne')
         last_updated = datetime.now(melbourne_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
 
         spreadsheet = _api_call(client.open_by_key, spreadsheet_id)

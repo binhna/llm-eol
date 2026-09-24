@@ -21,7 +21,7 @@ exactly why we keep tracking them for end-of-life dates.
 
 ## How we read other people's code safely
 
-By default each project is read from a **bare mirror** kept under `.cache/repos/`
+Each project is read from a **bare mirror** kept under `.cache/repos/`
 inside this project. A mirror is a private, read-only copy of the repo's history
 with no working tree at all, so scanning:
 
@@ -31,11 +31,6 @@ with no working tree at all, so scanning:
   - works even if you have never cloned that repo
 
 Nothing here ever runs `git pull`, `git checkout`, `git merge` or `git reset`.
-
-A project can instead be read from a local checkout with `'source': 'worktree'`,
-which is useful when you want whatever branch is currently checked out rather
-than `main`. That is still read-only — we only ever read files and run
-`git grep`. If the local checkout is missing, we fall back to the mirror.
 
 Searching uses `git grep`, which only looks at files git tracks. That keeps
 virtualenvs, caches and build output from polluting the results, and needs no
@@ -53,11 +48,6 @@ from pathlib import Path
 # name   : label shown in the report and the Google Sheet
 # remote : git URL, used to build/update the private bare mirror
 # branch : which branch to read (mirrors track exactly this one branch)
-# source : 'mirror'   read from our own bare mirror of `branch` (default, safest)
-#          'worktree' read the checkout at `path` as it is on disk right now,
-#                     whatever branch that happens to be. Read-only. Falls back
-#                     to the mirror if `path` isn't there.
-# path   : only needed for 'worktree', relative to this project's root
 # config : the model config file, relative to the repo root
 # format : how to read model names out of that file
 #            'json_keys'   -> top-level JSON keys whose value is an object
@@ -72,14 +62,6 @@ PROJECTS = [
         'name': 'bellmere',
         'remote': 'git@github.com:Studiosity/bellmere.git',
         'branch': 'main',
-        # Read main, like every other project. This used to read the local
-        # checkout to catch models added on in-flight integration branches, but
-        # that made the report depend on whichever branch each person happened
-        # to have checked out — two people would produce different sheets from
-        # the same command. Everyone reading main means one shared, repeatable
-        # answer. Set 'source': 'worktree' with a 'path' to go back to reading a
-        # local checkout.
-        'source': 'mirror',
         'config': 'src/config/models.yaml',
         'format': 'yaml_nested',
         # projects.yaml wires each model to an environment + TPM limit, and the
@@ -95,7 +77,6 @@ PROJECTS = [
         'name': 'burley',
         'remote': 'git@github.com:Studiosity/burley.git',
         'branch': 'main',
-        'source': 'mirror',
         'config': 'src/llm_config.json',
         'format': 'json_keys',
         # burley calls its embedding model "embedding"; the real model is the
@@ -106,7 +87,6 @@ PROJECTS = [
         'name': 'norval',
         'remote': 'git@github.com:Studiosity/norval.git',
         'branch': 'main',
-        'source': 'mirror',
         'config': 'llm_config.json',
         'format': 'json_keys',
     },
@@ -114,7 +94,6 @@ PROJECTS = [
         'name': 'bordertown',
         'remote': 'git@github.com:Studiosity/bordertown.git',
         'branch': 'main',
-        'source': 'mirror',
         'config': 'dev/llm_config.json',
         'format': 'json_keys',
     },
@@ -142,8 +121,6 @@ REFRESH_MIRRORS = True
 # while wrongly calling a live model "test only" could get a real dependency
 # ignored. So keep this list to names that are unambiguous — when in doubt, leave
 # a directory out and let it read as production.
-#
-# Add project-specific folders with an 'extra_non_production' key in PROJECTS.
 NON_PRODUCTION_DIRS = frozenset({
     'test', 'tests', 'testing', 'fixtures', 'mocks', 'stubs',
     'experiment', 'experiments',
@@ -166,7 +143,7 @@ NON_PRODUCTION_FILE_RE = re.compile(
 )
 
 
-def _is_production_path(path: str, extra_dirs: frozenset = frozenset()) -> bool:
+def _is_production_path(path: str) -> bool:
     """
     True if a reference at `path` looks like production code.
 
@@ -175,8 +152,8 @@ def _is_production_path(path: str, extra_dirs: frozenset = frozenset()) -> bool:
     if NON_PRODUCTION_FILE_RE.search(path):
         return False
     segments = [s.lower() for s in path.split('/')[:-1]]  # directories only
-    blocked = NON_PRODUCTION_DIRS | extra_dirs
-    return not any(s in blocked for s in segments)
+    return not any(s in NON_PRODUCTION_DIRS for s in segments)
+
 
 # Never evidence of use, in any project: dependency lock files pin package
 # versions and sometimes contain strings that look like model names.
@@ -200,16 +177,6 @@ def _run(args: list[str], cwd: Path) -> tuple[int, str]:
         return p.returncode, p.stdout
     except (OSError, subprocess.SubprocessError):
         return 1, ''
-
-
-def _is_git_repo(path: Path) -> bool:
-    code, _ = _run(['git', 'rev-parse', '--git-dir'], path)
-    return code == 0
-
-
-def _current_branch(path: Path) -> str:
-    _, out = _run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], path)
-    return out.strip() or '(unknown)'
 
 
 def _ensure_mirror(project: dict, root: Path) -> Path | None:
@@ -257,45 +224,9 @@ def _ensure_mirror(project: dict, root: Path) -> Path | None:
     return mirror
 
 
-def _resolve_source(project: dict, root: Path) -> tuple[Path, str, str] | None:
-    """
-    Work out where to read this project from.
-
-    Returns (repo_path, ref, description) where `ref` is either 'worktree'
-    (read files straight off disk) or a git ref to read out of history.
-    Returns None if the project can't be read at all.
-    """
-    name = project['name']
-
-    if project.get('source') == 'worktree':
-        path = project.get('path')
-        if path:
-            repo = (root / path).resolve()
-            if repo.exists() and _is_git_repo(repo):
-                return repo, 'worktree', f"local checkout ({_current_branch(repo)})"
-            print(f"  [{name}] no local checkout at {repo} — using our mirror instead")
-
-    mirror = _ensure_mirror(project, root)
-    if mirror is None:
-        return None
-    branch = project.get('branch', 'main')
-    return mirror, branch, f"mirror of {branch}"
-
-
-def _read_config(project: dict, repo: Path, ref: str) -> str | None:
+def _read_config(project: dict, mirror: Path, branch: str) -> str | None:
     """Return the raw text of the project's model config file, or None."""
-    config_path = project['config']
-
-    if ref == 'worktree':
-        full = repo / config_path
-        if not full.exists():
-            return None
-        try:
-            return full.read_text(encoding='utf-8')
-        except OSError:
-            return None
-
-    code, out = _run(['git', 'show', f'{ref}:{config_path}'], repo)
+    code, out = _run(['git', 'show', f"{branch}:{project['config']}"], mirror)
     return out if code == 0 and out.strip() else None
 
 
@@ -370,10 +301,7 @@ def _search(model: str, project: dict, repo: Path, ref: str) -> list[str]:
     # -F fixed string, -n line numbers, -I skip binary files.
     # We search for the plain substring (fast, portable) and then filter the
     # results in Python, because git grep has no portable look-around support.
-    if ref == 'worktree':
-        args = ['git', 'grep', '-F', '-n', '-I', model, '--', '.', *excludes]
-    else:
-        args = ['git', 'grep', '-F', '-n', '-I', model, ref, '--', '.', *excludes]
+    args = ['git', 'grep', '-F', '-n', '-I', model, ref, '--', '.', *excludes]
 
     code, out = _run(args, repo)
     if code != 0 or not out:
@@ -382,24 +310,18 @@ def _search(model: str, project: dict, repo: Path, ref: str) -> list[str]:
     pattern = _whole_name_re(model)
     hits = []
     for line in out.splitlines():
-        # worktree form:  path:line:content
-        # ref form:       ref:path:line:content
-        # Split only as far as the line number — the content that follows often
-        # contains colons of its own (`  model: openai.gpt-oss-20b-1:0`), and
-        # splitting further would truncate it and lose the match.
-        fields = 3 if ref == 'worktree' else 4
-        parts = line.split(':', fields - 1)
-        if len(parts) < fields:
+        # ref:path:line:content — split only as far as the line number, because
+        # the content often has colons of its own (`model: openai.gpt-oss-20b-1:0`)
+        parts = line.split(':', 3)
+        if len(parts) < 4:
             continue
-        if ref != 'worktree':
-            parts = parts[1:]
-        path, lineno, content = parts[0], parts[1], parts[2]
+        _, path, lineno, content = parts
         if pattern.search(content):
             hits.append(f"{path}:{lineno}")
     return hits
 
 
-def _classify(hits: list[str], extra_dirs: frozenset = frozenset()) -> tuple[str, str]:
+def _classify(hits: list[str]) -> tuple[str, str]:
     """
     Return (status, evidence) for a model's search hits.
 
@@ -410,7 +332,7 @@ def _classify(hits: list[str], extra_dirs: frozenset = frozenset()) -> tuple[str
     if not hits:
         return STATUS_CONFIG_ONLY, ''
 
-    production = [h for h in hits if _is_production_path(h.rsplit(':', 1)[0], extra_dirs)]
+    production = [h for h in hits if _is_production_path(h.rsplit(':', 1)[0])]
     if production:
         production.sort(key=lambda h: (0 if h.startswith('src/') else 1, h))
         return STATUS_USED, production[0]
@@ -432,7 +354,6 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
              }, …
           },
           'rows':     [ {model, project, status, evidence}, … ]  # for the sheet
-          'scanned':  ['bellmere', …],
           'skipped':  [('foo', 'reason'), …],
         }
     """
@@ -450,12 +371,13 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
     for project in projects:
         name = project['name']
 
-        resolved = _resolve_source(project, root)
-        if resolved is None:
+        mirror = _ensure_mirror(project, root)
+        if mirror is None:
             skipped.append((name, 'could not read the repo'))
             print(f"  [{name}] skipped — could not read the repo")
             continue
-        repo, ref, where = resolved
+        repo, ref = mirror, project.get('branch', 'main')
+        where = f"mirror of {ref}"
 
         raw = _read_config(project, repo, ref)
         if raw is None:
@@ -472,21 +394,19 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
         aliases = project.get('aliases', {})
         print(f"  [{name}] {len(declared)} models declared in {project['config']} — {where}")
 
-        extra_dirs = frozenset(d.lower() for d in project.get('extra_non_production', ()))
-
         for raw_name, provider in declared:
             model = aliases.get(raw_name, raw_name)
             # search for the config key, and for the resolved name if different
             hits = _search(raw_name, project, repo, ref)
             if model != raw_name:
                 hits += _search(model, project, repo, ref)
-            status, evidence = _classify(hits, extra_dirs)
+            status, evidence = _classify(hits)
 
             # Remember which folders we treated as production, so a directory
             # nobody has classified yet can be reported rather than assumed.
             for hit in hits:
                 path = hit.rsplit(':', 1)[0]
-                if '/' in path and _is_production_path(path, extra_dirs):
+                if '/' in path and _is_production_path(path):
                     production_dirs[project['name']].add(path.split('/')[0])
 
             entry = models.setdefault(model, {
@@ -526,8 +446,8 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
 
     # Show which top-level folders counted as production. If a repo adds a new
     # folder that is really tests or a sandbox, it shows up here as production
-    # and can be added to NON_PRODUCTION_DIRS or the project's
-    # 'extra_non_production' list. Without this the misread would be invisible.
+    # and can be added to NON_PRODUCTION_DIRS. Without this the misread would be
+    # invisible.
     if production_dirs:
         listed = '; '.join(
             f"{proj}: {', '.join(sorted(dirs))}"
@@ -537,10 +457,7 @@ def scan_projects(projects: list[dict] | None = None, root: Path | None = None) 
         print("  (if any of those are really tests or scratch work, add them to"
               " NON_PRODUCTION_DIRS in src/scanner.py)")
 
-    return {
-        'models': models, 'rows': rows, 'scanned': scanned, 'skipped': skipped,
-        'production_dirs': {k: sorted(v) for k, v in production_dirs.items()},
-    }
+    return {'models': models, 'rows': rows, 'skipped': skipped}
 
 
 def models_to_track(scan: dict, extra: list[str] | None = None) -> list[str]:

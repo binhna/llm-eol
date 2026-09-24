@@ -1,10 +1,6 @@
 import re
-import warnings
 from bs4 import BeautifulSoup
 from utils import get_html
-
-# Suppress BeautifulSoup warnings about parser choice
-warnings.filterwarnings('ignore', category=UserWarning, module='bs4')
 
 SOURCE_URL = 'https://docs.cloud.google.com/vertex-ai/generative-ai/docs/deprecations/partner-models'
 

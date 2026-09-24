@@ -169,44 +169,10 @@ def check_my_models(my_models, deprecation_data, model_providers=None):
 
     if deprecation_matches:
         print("\n  DEPRECATED MODELS FOUND:\n")
-
         for row in deprecation_matches:
-            _, days_remaining, risk_level, _ = calculate_risk_info(row['Shutdown Date'])
-            row['Days Remaining'] = days_remaining
-            row['Risk Level'] = risk_level
-
-        col_widths = {
-            'Our Model':     max(25, max(len(str(r['Our Model']))     for r in deprecation_matches)),
-            'Scraped Model': max(25, max(len(str(r['Scraped Model'])) for r in deprecation_matches)),
-            'Provider':      max(15, max(len(str(r['Provider']))      for r in deprecation_matches)),
-            'Shutdown Date': 35,
-            'Days Left':     10,
-            'Risk':          9,
-        }
-
-        header = (
-            f"{'Our Model':<{col_widths['Our Model']}} | "
-            f"{'Scraped Model':<{col_widths['Scraped Model']}} | "
-            f"{'Provider':<{col_widths['Provider']}} | "
-            f"{'Shutdown Date':<{col_widths['Shutdown Date']}} | "
-            f"{'Days Left':<{col_widths['Days Left']}} | "
-            f"{'Risk':<{col_widths['Risk']}}"
-        )
-        print(header)
-        print("-" * len(header))
-
-        for row in deprecation_matches:
-            shutdown_date = str(row['Shutdown Date'])
-            if len(shutdown_date) > col_widths['Shutdown Date']:
-                shutdown_date = shutdown_date[:col_widths['Shutdown Date'] - 3] + '...'
-            print(
-                f"{row['Our Model']:<{col_widths['Our Model']}} | "
-                f"{row['Scraped Model']:<{col_widths['Scraped Model']}} | "
-                f"{row['Provider']:<{col_widths['Provider']}} | "
-                f"{shutdown_date:<{col_widths['Shutdown Date']}} | "
-                f"{str(row['Days Remaining']):<{col_widths['Days Left']}} | "
-                f"{str(row['Risk Level']):<{col_widths['Risk']}}"
-            )
+            _, row['Days Remaining'], row['Risk Level'], _ = calculate_risk_info(row['Shutdown Date'])
+            print(f"  {row['Our Model']:48} {row['Risk Level']:17} {str(row['Days Remaining']):>5}  "
+                  f"{row['Provider']:20} {str(row['Shutdown Date'])[:40]}")
         print()
     else:
         print("\n  None of your models appear to be deprecated right now.\n")

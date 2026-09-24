@@ -6,7 +6,7 @@ Tracks LLM model deprecation and retirement dates, matches them to models used b
 
 ### Requirements
 
-- Python 3.8 or later
+- Python 3.9 or later
 - Git
 - Access to the shared Google Sheet
 - **A Google service-account key saved as `credentials.json`**
@@ -115,15 +115,13 @@ Mirrored projects are stored as private, read-only bare mirrors under `.cache/re
 
 By default, every project is read from a private mirror of `main`. This gives everyone the same, repeatable results and keeps local branches and uncommitted changes out of the shared report.
 
-To read a local checkout instead, set `'source': 'worktree'` and its `'path'` in `PROJECTS`. The scanner remains read-only and uses the mirror if the checkout is missing.
-
 To skip network refreshes and use existing mirrors, set this in `src/scanner.py`:
 
 ```python
 REFRESH_MIRRORS = False
 ```
 
-To add or change a scanned repository, edit `PROJECTS` in `src/scanner.py`. A project can use `source: 'mirror'` or `source: 'worktree'`.
+To add or change a scanned repository, edit `PROJECTS` in `src/scanner.py`.
 
 ## Local database
 

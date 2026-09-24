@@ -2,6 +2,7 @@ import re
 import pandas as pd
 from io import StringIO
 from utils import get_html, parse_shutdown_date
+from parsers.bedrock_model_cards import _MODEL_ID_RE
 
 # On 7 Sept 2026 AWS moved the lifecycle tables to this -legacy page. Models
 # launched after that date only publish an "EOL no sooner than" date on their
@@ -48,6 +49,8 @@ def parse_bedrock():
             if 'Model ID' in df.columns and 'EOL date' in df.columns:
                 for _, row in df.iterrows():
                     model_id = str(row['Model ID']).strip()
+                    if not _MODEL_ID_RE.match(model_id):
+                        continue  # AWS row with shifted columns, e.g. regions in the ID cell
                     eol = str(row['EOL date']).strip()
                     # Keep "No sooner than ..." as written: it is a floor, not an
                     # EOL date, and the risk calculation treats it as such.

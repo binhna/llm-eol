@@ -1,7 +1,7 @@
 import re
 import requests
-import pytz
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from dateutil import parser as date_parser
 
 
@@ -150,7 +150,7 @@ def calculate_risk_info(shutdown_date_str):
     Returns:
         tuple: (parsed_date_str, days_remaining, risk_level, color_dict)
     """
-    melbourne_tz = pytz.timezone('Australia/Melbourne')
+    melbourne_tz = ZoneInfo('Australia/Melbourne')
     current_date = datetime.now(melbourne_tz).replace(hour=0, minute=0, second=0, microsecond=0)
 
     raw = (shutdown_date_str or '').strip()
@@ -167,7 +167,7 @@ def calculate_risk_info(shutdown_date_str):
         return (shutdown_date_str, 'N/A', 'Unknown', {'red': 1.0, 'green': 1.0, 'blue': 1.0})
 
     if parsed_date.tzinfo is None:
-        parsed_date = melbourne_tz.localize(parsed_date)
+        parsed_date = parsed_date.replace(tzinfo=melbourne_tz)
 
     parsed_date = parsed_date.replace(hour=0, minute=0, second=0, microsecond=0)
     days_remaining = (parsed_date - current_date).days
