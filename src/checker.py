@@ -43,7 +43,7 @@ def _normalise_bracket_version(name):
 _CONFIG_PROVIDER_PREFERENCE = {
     'azure': ('Azure OpenAI', 'OpenAI'),
     'bedrock': ('AWS Bedrock',),
-    'google': ('Vertex AI', 'Google Gemini'),
+    'google': ('Vertex AI (Gemini)', 'Vertex AI', 'Google Gemini'),
     'anthropic': ('Vertex AI', 'Anthropic', 'AWS Bedrock'),
     'mistral': ('Vertex AI', 'Azure OpenAI', 'AWS Bedrock'),
 }

@@ -62,7 +62,7 @@ The model list is discovered automatically from product repositories. A model is
 
 Models used outside these repositories can be added to `EXTRA_MODELS` in `src/main.py`.
 
-Supported provider sources are Google Gemini, OpenAI, Azure OpenAI, Anthropic, Vertex AI, and AWS Bedrock. Bedrock model cards are also scraped for context limits, modalities, knowledge cutoff, and cross-region inference IDs.
+Supported provider sources are Google Gemini, OpenAI, Azure OpenAI, Anthropic, Vertex AI (partner models and Google's own Gemini model versions), and AWS Bedrock. For Gemini models, the Vertex AI dates are used first, because our products call Gemini through Vertex AI and its dates can differ from the Gemini API's. Bedrock model cards are also scraped for context limits, modalities, knowledge cutoff, and cross-region inference IDs.
 
 ## Results
 

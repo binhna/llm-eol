@@ -3,6 +3,7 @@ from parsers.openai import parse_openai
 from parsers.azure_openai import parse_azure_openai
 from parsers.anthropic import parse_anthropic
 from parsers.vertex_ai import parse_vertex_ai
+from parsers.vertex_gemini import parse_vertex_gemini
 from parsers.bedrock import parse_bedrock
 
 # The provider label each parser produces, paired with the parser itself. The
@@ -14,6 +15,7 @@ _PARSERS = (
     ('Azure OpenAI', parse_azure_openai),
     ('Anthropic', parse_anthropic),
     ('Vertex AI', parse_vertex_ai),
+    ('Vertex AI (Gemini)', parse_vertex_gemini),
     ('AWS Bedrock', parse_bedrock),
 )
 
