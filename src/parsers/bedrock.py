@@ -49,14 +49,10 @@ def parse_bedrock():
                 for _, row in df.iterrows():
                     model_id = str(row['Model ID']).strip()
                     eol = str(row['EOL date']).strip()
-                    # Strip "No sooner than " prefix
-                    m = re.match(r'no sooner than\s+(.*)', eol, re.IGNORECASE)
-                    if m:
-                        date_part = m.group(1).strip()
-                        # Skip "No sooner than launch date + 1 year" — no concrete date
-                        if re.search(r'launch date', date_part, re.IGNORECASE):
-                            continue
-                        eol = date_part
+                    # Keep "No sooner than ..." as written: it is a floor, not an
+                    # EOL date, and the risk calculation treats it as such.
+                    if re.search(r'launch date', eol, re.IGNORECASE):
+                        continue  # "no sooner than launch date + 1 year": no date at all
                     # The legacy page has a 'Legacy date' column; its rows are Legacy models
                     stage = 'Legacy' if 'Legacy date' in df.columns else 'Active'
                     _keep_earliest(model_id, eol, stage)

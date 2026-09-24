@@ -10,7 +10,11 @@ def get_html(url):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                       'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/120.0.0.0 Safari/537.36'
+                      'Chrome/120.0.0.0 Safari/537.36',
+        # Ask for gzip only. Some sites (docs.mistral.ai) send brotli, and the
+        # brotli decoder in some Python environments fails on it mid-stream,
+        # which kills the whole request. gzip is supported everywhere.
+        'Accept-Encoding': 'gzip, deflate',
     }
     response = requests.get(url, headers=headers, timeout=30)
     response.raise_for_status()
@@ -124,8 +128,12 @@ _NO_EOL_PHRASES = (
 
 
 # How providers phrase an earliest-possible date: AWS "No sooner than",
-# Anthropic "Not sooner than", Azure "No earlier than".
-_FLOOR_RE = re.compile(r'\s*(?:no|not)\s+(?:sooner|earlier)\s+than\b', re.IGNORECASE)
+# Anthropic "Not sooner than", Azure "No earlier than", Google "X or later".
+# Every provider's docs define these as a promise the model stays available at
+# least that long — never as a retirement date. When a real retirement is
+# scheduled the provider publishes a plain date instead.
+_FLOOR_RE = re.compile(
+    r'\s*(?:no|not)\s+(?:sooner|earlier)\s+than\b|.*\bor later\s*$', re.IGNORECASE)
 
 
 def calculate_risk_info(shutdown_date_str):
@@ -133,8 +141,9 @@ def calculate_risk_info(shutdown_date_str):
     Calculate days remaining and risk level based on shutdown date.
 
     Risk levels for the non-date cases:
-      'No EOL announced' — the provider lists the model but gives no date, or
-                           explicitly says none is scheduled. Nothing to do yet.
+      'No EOL announced' — the provider lists the model but gives no retirement
+                           date, says none is scheduled, or only gives an
+                           earliest-possible date ("no sooner than X"). OK for now.
       'Unknown'          — there IS a date string but we could not read it.
                            That is a parsing gap worth looking at.
 
@@ -147,8 +156,8 @@ def calculate_risk_info(shutdown_date_str):
     raw = (shutdown_date_str or '').strip()
     lowered = raw.lower()
 
-    # Provider explicitly gives no date
-    if not raw or any(p in lowered for p in _NO_EOL_PHRASES):
+    # Provider gives no date, says none is scheduled, or only gives a floor
+    if not raw or any(p in lowered for p in _NO_EOL_PHRASES) or _FLOOR_RE.match(raw):
         return (raw or 'None announced', 'N/A', 'No EOL announced',
                 {'red': 0.85, 'green': 0.92, 'blue': 0.98})  # pale blue
 
@@ -164,13 +173,7 @@ def calculate_risk_info(shutdown_date_str):
     days_remaining = (parsed_date - current_date).days
     formatted_date = parsed_date.strftime('%Y-%m-%d')
 
-    if days_remaining < 0 and _FLOOR_RE.match(raw):
-        # "No sooner than <past date>" is the earliest date a retirement could
-        # have been set, not a retirement. The model is still available and the
-        # provider has to give notice first (AWS: 6 months or 45 days).
-        risk_level = 'Can retire with notice'
-        color = {'red': 0.98, 'green': 0.86, 'blue': 0.70}  # soft apricot
-    elif days_remaining < 0:
+    if days_remaining < 0:
         risk_level = 'EXPIRED'
         color = {'red': 0.93, 'green': 0.56, 'blue': 0.56}  # Muted rose
     elif days_remaining <= 30:

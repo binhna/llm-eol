@@ -137,12 +137,9 @@ def _parse_card_html(html: str, url: str) -> dict | None:
     lifecycle_stage = _label(['Model lifecycle']) or None
     eol_raw = _label(['Model EOL date', 'EOL date'])
     shutdown_date = '' if eol_raw.lower() in _NA_VALUES else eol_raw
-    if not shutdown_date:
-        # Active models have no EOL date yet, but since Sept 2026 every card
-        # gives the earliest date one could be set. Track that floor.
-        floor = _label(['EOL no sooner than'])
-        if floor and floor.lower() not in _NA_VALUES:
-            shutdown_date = f'No sooner than {floor}'
+    # Deliberately NOT reading "EOL no sooner than": AWS defines it as the
+    # earliest a retirement could be set, not a retirement. The real EOL date is
+    # added to "Model EOL date" when the model moves to Legacy.
 
     context_window = _tokens_to_int(_label(['Context [Ww]indow']))
     max_output_tokens = _tokens_to_int(_label(['Max [Oo]utput [Tt]okens', 'Maximum output tokens']))

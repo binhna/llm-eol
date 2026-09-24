@@ -62,7 +62,7 @@ The model list is discovered automatically from product repositories. A model is
 
 Models used outside these repositories can be added to `EXTRA_MODELS` in `src/main.py`.
 
-Supported provider sources are Google Gemini, OpenAI, Azure OpenAI, Anthropic, Vertex AI (partner models and Google's own Gemini model versions), and AWS Bedrock. For Gemini models, the Vertex AI dates are used first, because our products call Gemini through Vertex AI and its dates can differ from the Gemini API's. Bedrock model cards are also scraped for context limits, modalities, knowledge cutoff, and cross-region inference IDs.
+Supported provider sources are Google Gemini, OpenAI, Azure OpenAI, Anthropic, Vertex AI (partner models and Google's own Gemini model versions), AWS Bedrock, and Mistral. For Gemini models, the Vertex AI dates are used first, because our products call Gemini through Vertex AI and its dates can differ from the Gemini API's. For Bedrock, a model's status comes from its model card, and its EOL date comes from AWS's Legacy list (or the card's EOL field once AWS fills it in). Bedrock model cards are also scraped for context limits, modalities, knowledge cutoff, and cross-region inference IDs.
 
 ## Results
 
@@ -78,12 +78,11 @@ Risk levels are based on the shutdown date:
 | Level | Meaning |
 |---|---|
 | EXPIRED | Shutdown date has passed |
-| Can retire with notice | The provider's *earliest possible* retirement date ("No sooner than …") has passed. The model still works; the provider must give notice before retiring it (AWS: 6 months or 45 days). |
 | CRITICAL | 30 days or less remain |
 | HIGH | 31 to 90 days remain |
 | MEDIUM | 91 to 180 days remain |
 | LOW | More than 180 days remain |
-| No EOL announced | The provider lists the model but has no retirement date |
+| No EOL announced | The provider lists the model but has no retirement date. This includes dates given only as a floor — "no sooner than X" (AWS), "not sooner than X" (Anthropic), "no earlier than X" (Azure), "X or later" (Google) — because every provider defines those as a minimum availability promise, not a retirement. |
 | Unknown | A date exists but could not be parsed |
 | Not found | The model was not found on a provider page |
 

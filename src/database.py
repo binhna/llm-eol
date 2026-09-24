@@ -86,10 +86,9 @@ def merge_card_metadata(db: dict, card_records: list) -> dict:
     ones) the card supplies the EOL date and lifecycle stage too.
 
     - New model: add with the card's shutdown_date / lifecycle_stage / metadata.
-    - Existing model: always refresh card metadata; fill shutdown_date,
-      lifecycle_stage and source_url ONLY if the lifecycle page (the dedicated
-      deprecation source, merged first) didn't already set them — so a concrete
-      EOL date is never overwritten by a card's "N/A".
+    - Existing model: the card's lifecycle status always wins. The EOL date
+      comes from the Legacy list if it listed the model on this run, otherwise
+      from the card (empty when the card has no EOL date).
     """
     today = datetime.now().strftime('%Y-%m-%d')
     for record in card_records:
@@ -107,12 +106,17 @@ def merge_card_metadata(db: dict, card_records: list) -> dict:
                 db[key]['lifecycle_stage'] = record['lifecycle_stage']
         else:
             rec = db[key]
-            if not rec.get('shutdown_date') and record.get('shutdown_date'):
-                rec['shutdown_date'] = record['shutdown_date']
-            if not rec.get('lifecycle_stage') and record.get('lifecycle_stage'):
+            if record.get('lifecycle_stage'):
                 rec['lifecycle_stage'] = record['lifecycle_stage']
-            if not rec.get('source_url') and record.get('model_card_url'):
-                rec['source_url'] = record['model_card_url']
+            # Keep the Legacy list's EOL date only if that list confirmed the
+            # model on this run (merge_scraped runs first). Otherwise the card
+            # is the truth — including "no date" — so a date left over from an
+            # older version of the lifecycle page can't sit there looking fresh.
+            on_legacy_list = (rec.get('last_seen') == today
+                              and 'model-lifecycle' in rec.get('source_url', ''))
+            if not on_legacy_list:
+                rec['shutdown_date'] = record.get('shutdown_date', '') or ''
+                rec['source_url'] = record.get('model_card_url', rec.get('source_url', ''))
             rec['last_seen'] = today
         for field in _CARD_FIELDS:
             if field in record and record[field]:
